@@ -212,26 +212,46 @@ async function clickPlayAndDownload(anchor, keyword){
 
 async function collectVideoItemsByClick(maxCount, keyword, offset=0){
   safeSend({type:'progress',text:`开始抓取关键词 [${keyword}] ...`});
-  // switchToVideoTab 已在脚本开始阶段由 background 触发，此处避免再次切换，防止排序被重置
-  await new Promise(r=>setTimeout(r,1000));
-  let anchors=getCardAnchors();
-  let idx=offset;const items=[];const seen=new Set();
-  while(items.length<maxCount && idx<anchors.length){
-    const a=anchors[idx];
-    const href=a.getAttribute('href');
-    let noteId;
-    try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=`idx${idx}`} 
-    if(seen.has(noteId)){idx++;continue;}
-    seen.add(noteId);
-    const stream=await clickPlayAndDownload(a,keyword);
-    if(stream){items.push({noteId,url:stream});}
-    idx++;
-    if(items.length<maxCount && idx>=anchors.length){
+  // 已在视频标签，稍作等待确保渲染完成
+  await new Promise(r=>setTimeout(r,800));
+
+  const items=[];
+  const seen=new Set();
+  let scrollAttempts=0;
+
+  while(items.length<maxCount && scrollAttempts<20){
+    const anchors=getCardAnchors();
+    let processedThisRound=false;
+
+    for(const a of anchors){
+      const href=a.getAttribute('href');
+      if(!href) continue;
+      let noteId;
+      try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=href;}
+      if(seen.has(noteId)) continue;
+      seen.add(noteId);
+
+      // 跳过 offset 数量
+      if(seen.size<=offset) continue;
+
+      const stream=await clickPlayAndDownload(a,keyword);
+      processedThisRound=true;
+      if(stream){items.push({noteId,url:stream});
+        safeSend({type:'progress',text:`已完成 ${items.length}/${maxCount} : ${noteId}`});
+      }
+      if(items.length>=maxCount) break;
+    }
+
+    if(items.length>=maxCount) break;
+
+    if(!processedThisRound){
+      // 没有新元素被处理，继续向下滚动
       window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
+      scrollAttempts++;
       await new Promise(r=>setTimeout(r,1200));
-      anchors=getCardAnchors();
     }
   }
+
   safeSend({type:'progress',text:`下载完成 共 ${items.length} 个`});
   return items;
 }
