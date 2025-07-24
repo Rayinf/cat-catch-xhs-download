@@ -217,41 +217,38 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
 
   const items=[];
   const seen=new Set();
+  let nextIndex=0;
   let scrollAttempts=0;
 
-  while(items.length<maxCount && scrollAttempts<20){
+  while(items.length<maxCount && scrollAttempts<30){
     const anchors=getCardAnchors();
-    let processedThisRound=false;
 
-    for(const a of anchors){
+    while(nextIndex<anchors.length && items.length<maxCount){
+      const a=anchors[nextIndex];
+      nextIndex++;
+      if(!a) continue;
       const href=a.getAttribute('href');
       if(!href) continue;
       let noteId;
       try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=href;}
       if(seen.has(noteId)) continue;
       seen.add(noteId);
-
-      // 跳过 offset 数量
       if(seen.size<=offset) continue;
 
       const stream=await clickPlayAndDownload(a,keyword);
-      processedThisRound=true;
       if(stream){items.push({noteId,url:stream});
         safeSend({type:'progress',text:`已完成 ${items.length}/${maxCount} : ${noteId}`});
       }
-      if(items.length>=maxCount) break;
     }
 
     if(items.length>=maxCount) break;
 
-    if(!processedThisRound){
-      // 没有新元素被处理，继续向下滚动
-      window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
-      scrollAttempts++;
-      await new Promise(r=>setTimeout(r,1200));
-    }
+    // 所有当前 anchor 已处理，开始滚动
+    window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
+    scrollAttempts++;
+    await new Promise(r=>setTimeout(r,1200));
   }
-
+   
   safeSend({type:'progress',text:`下载完成 共 ${items.length} 个`});
   return items;
 }
