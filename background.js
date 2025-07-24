@@ -64,7 +64,7 @@ function sendMessagePromise(tabId, message) {
   });
 }
 
-async function downloadByKeyword(keyword, maxCount = 20) {
+async function downloadByKeyword(keyword, maxCount = 20, sortLabel='综合', offset=0) {
   try {
     console.log(`Starting download for keyword: ${keyword}, count: ${maxCount}`);
     const tabId = await ensureSearchTab(keyword);
@@ -107,7 +107,8 @@ async function downloadByKeyword(keyword, maxCount = 20) {
     const { items } = await sendMessagePromise(tabId, { 
       type: 'collect-video-items', 
       maxCount, 
-      keyword 
+      keyword,
+      offset
     });
     
     console.log(`Download completed, found ${items.length} items`);
@@ -179,8 +180,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   
   if (msg.type === 'xhs-download') {
-    const { keyword, count } = msg.payload;
-    downloadByKeyword(keyword, count)
+    const { keyword, count, sort, offset } = msg.payload;
+    downloadByKeyword(keyword, count, sort, offset)
       .then(total => sendResponse({ ok: true, total }))
       .catch(err => sendResponse({ ok: false, error: err.message }));
     // 返回 true 表示异步响应

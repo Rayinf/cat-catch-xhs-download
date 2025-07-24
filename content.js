@@ -210,12 +210,12 @@ async function clickPlayAndDownload(anchor, keyword){
   return null;
 }
 
-async function collectVideoItemsByClick(maxCount, keyword){
+async function collectVideoItemsByClick(maxCount, keyword, offset=0){
   safeSend({type:'progress',text:`开始抓取关键词 [${keyword}] ...`});
   // switchToVideoTab 已在脚本开始阶段由 background 触发，此处避免再次切换，防止排序被重置
   await new Promise(r=>setTimeout(r,1000));
   let anchors=getCardAnchors();
-  let idx=0;const items=[];const seen=new Set();
+  let idx=offset;const items=[];const seen=new Set();
   while(items.length<maxCount && idx<anchors.length){
     const a=anchors[idx];
     const href=a.getAttribute('href');
@@ -306,7 +306,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   
   if (msg.type === 'collect-video-items') {
     CURRENT_KEYWORD = msg.keyword || 'xhs';
-    collectVideoItemsByClick(msg.maxCount || 20, CURRENT_KEYWORD)
+    collectVideoItemsByClick(msg.maxCount || 20, CURRENT_KEYWORD, msg.offset||0)
       .then(items => sendResponse({ items }))
       .catch(error => sendResponse({ items: [], error: error.message }));
     return true;

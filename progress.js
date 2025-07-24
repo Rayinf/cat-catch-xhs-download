@@ -2,6 +2,8 @@ function append(text){const el=document.getElementById('log');el.textContent+=te
 const params=new URLSearchParams(location.search);
 const keyword=params.get('keyword')||'';
 const count=parseInt(params.get('count'),10)||20;
+const sort=params.get('sort')||'综合';
+const offset=parseInt(params.get('offset')||'0',10);
 
 document.getElementById('title').textContent=`下载关键词：${keyword} (目标 ${count})`;
 append('初始化...');

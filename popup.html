@@ -8,7 +8,8 @@
 <body>
   <h2>小红书视频批量下载</h2>
   <label>关键词：<input type="text" id="keyword" placeholder="如：旅行攻略" /></label>
-  <label>数量：<input type="number" id="count" value="20" min="1" max="200" /></label>
+  <label>下载数量: <input type="number" id="count" value="20" min="1"></label>
+  <label>跳过已下载: <input type="number" id="offset" value="0" min="0"></label>
   <button id="btn-download">开始下载</button>
   <pre id="log"></pre>
   <script src="popup.js"></script>
