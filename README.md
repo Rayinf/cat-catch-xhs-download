@@ -1,10 +1,9 @@
 # 猫抓·小红书批量下载 🐱
 
-[![Chrome Web Store](https://img.shields.io/chrome-web-store/v/YOUR_EXTENSION_ID.svg)](https://chrome.google.com/webstore/detail/YOUR_EXTENSION_ID)
 [![GitHub release](https://img.shields.io/github/release/YOUR_USERNAME/cat-catch-xhs-download.svg)](https://github.com/YOUR_USERNAME/cat-catch-xhs-download/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-基于猫抓资源嗅探技术，实现小红书按关键词批量下载视频的Chrome扩展。
+基于猫抓资源嗅探技术，实现小红书按关键词批量下载视频的开源工具。
 
 ## ✨ 功能特色
 
@@ -14,20 +13,6 @@
 - 📁 **分类保存**: 按关键词自动创建文件夹分类保存
 - ⚡ **实时监控**: 自动捕获页面中的视频资源
 - 🔄 **去重机制**: 避免重复下载相同视频
-
-## 🛠️ 安装方法
-
-### 方法一：Chrome扩展商店（推荐）
-1. 访问 [Chrome Web Store](https://chrome.google.com/webstore/detail/YOUR_EXTENSION_ID)
-2. 点击"添加至Chrome"
-3. 确认安装权限
-
-### 方法二：手动安装
-1. 下载最新版本的 [Release](https://github.com/YOUR_USERNAME/cat-catch-xhs-download/releases)
-2. 解压到本地文件夹
-3. 打开Chrome浏览器，访问 `chrome://extensions/`
-4. 开启"开发者模式"
-5. 点击"加载已解压的扩展程序"，选择解压后的文件夹
 
 ## 📖 使用说明
 
@@ -55,24 +40,24 @@
 
 1. **资源嗅探**: 使用 `webRequest` API 监听网络请求
 2. **URL匹配**: 识别小红书视频资源链接模式
-3. **自动下载**: 调用 `chrome.downloads` API 执行下载
+3. **自动下载**: 调用浏览器下载 API 执行下载
 4. **内容脚本**: 在页面中注入脚本获取视频信息
 5. **消息通信**: Background与Content Script间的消息传递
 
 ## 📝 更新日志
 
-### v0.1.3 (2024-12-19)
+### v0.1.3 (2025-07-24)
 - 🐛 修复URL模式匹配错误
 - ✨ 优化下载去重机制
 - 🔧 改进错误处理和重试逻辑
 - 📱 增强Service Worker稳定性
 
-### v0.1.2 (2024-12-19)
+### v0.1.2 (2025-07-24)
 - ✨ 新增自动下载功能
 - 🛠️ 修复消息通道连接问题
 - 📊 添加详细的下载进度显示
 
-### v0.1.0 (2024-12-19)
+### v0.1.0 (2025-07-24)
 - 🎉 首个版本发布
 - 🎯 支持关键词搜索下载
 - 💧 无水印视频获取
@@ -100,7 +85,6 @@
 
 ## 🔗 相关链接
 
-- [Chrome扩展开发文档](https://developer.chrome.com/docs/extensions/)
 - [小红书官网](https://www.xiaohongshu.com/)
 - [问题反馈](https://github.com/YOUR_USERNAME/cat-catch-xhs-download/issues)
 
@@ -108,9 +92,18 @@
 
 如果你有任何问题或建议，请通过以下方式联系：
 
-- 📧 Email: your.email@example.com
+- 📧 Email: xxlmxx21@gmail.com
 - 💬 GitHub Issues: [提交问题](https://github.com/YOUR_USERNAME/cat-catch-xhs-download/issues)
 
 ---
 
 ⭐ 如果这个项目对你有帮助，请给它一个星标！ 
+
+## 💖 致谢
+
+本项目基于 [原版猫抓](https://github.com/xifangczy/cat-catch) 的资源嗅探技术进行开发，感谢 [@xifangczy](https://github.com/xifangczy) 及其团队的开源贡献。
+
+原版猫抓是一个优秀的浏览器资源嗅探扩展，为广大开发者提供了强大的资源捕获功能。本项目在其基础上专注于小红书视频的批量下载功能。
+
+- 原项目地址：https://github.com/xifangczy/cat-catch
+- 原项目文档：https://cat-catch.bmmmd.com/ 
