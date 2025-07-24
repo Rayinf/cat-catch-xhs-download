@@ -212,7 +212,7 @@ async function clickPlayAndDownload(anchor, keyword){
 
 async function collectVideoItemsByClick(maxCount, keyword){
   safeSend({type:'progress',text:`开始抓取关键词 [${keyword}] ...`});
-  switchToVideoTab();
+  // switchToVideoTab 已在脚本开始阶段由 background 触发，此处避免再次切换，防止排序被重置
   await new Promise(r=>setTimeout(r,1000));
   let anchors=getCardAnchors();
   let idx=0;const items=[];const seen=new Set();
@@ -251,6 +251,50 @@ async function downloadBlob(url, filename) {
   safeSend({type:'progress',text:`保存完成 ${filename}`});
 }
 
+/** 切换排序依据 */
+function applySort(sortLabel){
+  console.log('[applySort] start:', sortLabel);
+
+  return new Promise(resolve=>{
+    const filterBtn=document.querySelector('div.filter');
+    if(!filterBtn){console.warn('[applySort] filter button not found');resolve(false);return;}
+
+    // helper to open panel
+    function openPanel(){
+      filterBtn.click();
+      return waitFor(()=>document.querySelector('div.tag-container'),3000,100);
+    }
+
+    function clickOption(container){
+      const tags=Array.from(container.querySelectorAll('div.tags, .tags'));
+      const target=tags.find(el=>{
+        const span=el.querySelector('span');
+        return (span?span.innerText:el.innerText).trim()===sortLabel;
+      });
+      if(!target){
+        console.warn('[applySort] target option not found', sortLabel);
+        return false;
+      }
+      target.click();
+      return true;
+    }
+
+    async function run(){
+      try{
+        const container=await openPanel();
+        if(!clickOption(container)) return resolve(false);
+        // 关闭面板并等待页面内容刷新
+        filterBtn.click();
+        setTimeout(()=>resolve(true),800);
+      }catch(e){
+        console.error('[applySort] error',e);
+        resolve(false);
+      }
+    }
+    run();
+  });
+}
+
 // 监听 background 发送的请求
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log('Content script received message:', msg.type);
@@ -285,6 +329,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'fetch-video-url') {
     const { noteId } = msg;
     fetchVideoUrl(noteId).then(url => sendResponse({ url }));
+    return true;
+  }
+
+  if (msg.type === 'apply-sort') {
+    applySort(msg.sortLabel).then(ok=>sendResponse({ok}));
     return true;
   }
 });
