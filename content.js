@@ -176,7 +176,16 @@ async function fetchVideoUrlFromAnchor(anchor, noteId) {
 }
 
 function getCardAnchors() {
-  return Array.from(document.querySelectorAll('section.note-item a.cover[href]'));
+  const list = Array.from(document.querySelectorAll('section.note-item a.cover[href]'));
+  return list.sort((a, b) => {
+    const ra = a.getBoundingClientRect();
+    const rb = b.getBoundingClientRect();
+    // 行判断容忍 5px 误差
+    if (Math.abs(ra.top - rb.top) < 5) {
+      return ra.left - rb.left; // 同行按列序
+    }
+    return ra.top - rb.top; // 不同行按 top 排
+  });
 }
 
 async function waitForStream(timeout=8000){
