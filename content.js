@@ -195,15 +195,25 @@ async function waitForStream(timeout=8000){
 
 async function clickPlayAndDownload(anchor, keyword){
   anchor.scrollIntoView({behavior:'smooth',block:'center'});
+  await new Promise(r=>setTimeout(r,400));
   anchor.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-  let url;
-  try{url=await waitForStream();}catch{}
-  // close overlay if open
+
+  let url=null;
+  try{url=await waitForStream(2500);}catch{}
+
+  if(!url){
+    // fallback 解析详情页
+    const href=anchor.getAttribute('href');
+    let noteId;
+    try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=href;}
+    url=await fetchVideoUrlFromAnchor(anchor,noteId);
+  }
+
+  // 关闭预览浮层
   const closeBtn=document.querySelector('div.close-box,[class*="close-box"],svg[class*="close" i]');
   if(closeBtn) closeBtn.click();
+
   if(url){
-    // const file=url.split('/').pop();
-    // 不再在 content script 内触发下载，由 background 统一处理
     safeSend({type:'progress',text:`捕获到流 ${url.split('/').pop()}`});
     return url;
   }
@@ -215,7 +225,8 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
   await new Promise(r=>setTimeout(r,600));
 
   const items=[];           // 已成功下载的视频
-  const processed=new Set();// 处理过的 noteId（包含跳过与已下载）
+  const processed=new Set();// 已处理 noteId
+  let skipRemain=offset;    // 还需跳过的成功视频数
   let idleRounds=0;         // 连续无新卡片轮次
 
   while(items.length<maxCount && idleRounds<40){
@@ -231,16 +242,17 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
 
       processed.add(noteId);
 
-      if(processed.size<=offset){
-        // 仅计数跳过，不下载
-        continue;
-      }
-
       gotNew=true;
       const stream=await clickPlayAndDownload(a,keyword);
+
       if(stream){
-        items.push({noteId,url:stream});
-        safeSend({type:'progress',text:`已完成 ${items.length}/${maxCount} : ${noteId}`});
+        if(skipRemain>0){
+          skipRemain--; // 跳过
+          safeSend({type:'progress',text:`已跳过 ${noteId}`});
+        } else {
+          items.push({noteId,url:stream});
+          safeSend({type:'progress',text:`已完成 ${items.length}/${maxCount} : ${noteId}`});
+        }
       }
 
       // 处理一个后重新计算 anchors，预防瀑布布局变动
