@@ -212,44 +212,49 @@ async function clickPlayAndDownload(anchor, keyword){
 
 async function collectVideoItemsByClick(maxCount, keyword, offset=0){
   safeSend({type:'progress',text:`开始抓取关键词 [${keyword}] ...`});
-  await new Promise(r=>setTimeout(r,800));
+  await new Promise(r=>setTimeout(r,600));
 
-  const items=[];
-  const seen=new Set();
-  let idleRounds=0;
+  const items=[];           // 已成功下载的视频
+  const processed=new Set();// 处理过的 noteId（包含跳过与已下载）
+  let idleRounds=0;         // 连续无新卡片轮次
 
-  while(items.length<maxCount && idleRounds<25){
+  while(items.length<maxCount && idleRounds<40){
     const anchors=getCardAnchors();
-    let processed=0;
+    let gotNew=false;
 
     for(const a of anchors){
       const href=a.getAttribute('href');
       if(!href) continue;
       let noteId;
       try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=href;}
-      if(seen.has(noteId)) continue;
-      seen.add(noteId);
-      if(seen.size<=offset) continue;
+      if(processed.has(noteId)) continue;
 
+      processed.add(noteId);
+
+      if(processed.size<=offset){
+        // 仅计数跳过，不下载
+        continue;
+      }
+
+      gotNew=true;
       const stream=await clickPlayAndDownload(a,keyword);
-      processed++;
-      if(stream){items.push({noteId,url:stream});
+      if(stream){
+        items.push({noteId,url:stream});
         safeSend({type:'progress',text:`已完成 ${items.length}/${maxCount} : ${noteId}`});
       }
-      if(items.length>=maxCount) break;
+
+      // 处理一个后重新计算 anchors，预防瀑布布局变动
+      break;
     }
 
-    if(items.length>=maxCount) break;
-
-    if(processed===0){
-      idleRounds++;
-    } else {
+    if(gotNew){
       idleRounds=0;
+    } else {
+      idleRounds++;
+      // 没有新元素，向下滚动一屏
+      window.scrollBy({top:window.innerHeight*0.9,behavior:'smooth'});
+      await new Promise(r=>setTimeout(r,800));
     }
-
-    // 滚动加载新内容
-    window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
-    await new Promise(r=>setTimeout(r,1200));
   }
 
   safeSend({type:'progress',text:`下载完成 共 ${items.length} 个`});
