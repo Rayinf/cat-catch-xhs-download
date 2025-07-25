@@ -212,21 +212,17 @@ async function clickPlayAndDownload(anchor, keyword){
 
 async function collectVideoItemsByClick(maxCount, keyword, offset=0){
   safeSend({type:'progress',text:`开始抓取关键词 [${keyword}] ...`});
-  // 已在视频标签，稍作等待确保渲染完成
   await new Promise(r=>setTimeout(r,800));
 
   const items=[];
   const seen=new Set();
-  let nextIndex=0;
-  let scrollAttempts=0;
+  let idleRounds=0;
 
-  while(items.length<maxCount && scrollAttempts<30){
+  while(items.length<maxCount && idleRounds<25){
     const anchors=getCardAnchors();
+    let processed=0;
 
-    while(nextIndex<anchors.length && items.length<maxCount){
-      const a=anchors[nextIndex];
-      nextIndex++;
-      if(!a) continue;
+    for(const a of anchors){
       const href=a.getAttribute('href');
       if(!href) continue;
       let noteId;
@@ -236,19 +232,26 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
       if(seen.size<=offset) continue;
 
       const stream=await clickPlayAndDownload(a,keyword);
+      processed++;
       if(stream){items.push({noteId,url:stream});
         safeSend({type:'progress',text:`已完成 ${items.length}/${maxCount} : ${noteId}`});
       }
+      if(items.length>=maxCount) break;
     }
 
     if(items.length>=maxCount) break;
 
-    // 所有当前 anchor 已处理，开始滚动
+    if(processed===0){
+      idleRounds++;
+    } else {
+      idleRounds=0;
+    }
+
+    // 滚动加载新内容
     window.scrollTo({top:document.body.scrollHeight,behavior:'smooth'});
-    scrollAttempts++;
     await new Promise(r=>setTimeout(r,1200));
   }
-   
+
   safeSend({type:'progress',text:`下载完成 共 ${items.length} 个`});
   return items;
 }
