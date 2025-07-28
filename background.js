@@ -8,6 +8,7 @@
 console.log('XHS Background Script loaded at:', new Date().toISOString());
 
 const XHS_HOST = 'https://www.xiaohongshu.com';
+let currentKeyword = '';
 
 /**
  * 确保存在搜索结果标签页，并返回其 tabId
@@ -67,6 +68,7 @@ function sendMessagePromise(tabId, message) {
 async function downloadByKeyword(keyword, maxCount = 20, sortLabel = '综合', offset=0) {
   try {
     console.log(`Starting download for keyword: ${keyword}, count: ${maxCount}`);
+    currentKeyword = keyword; // 设置当前关键词
     const tabId = await ensureSearchTab(keyword);
     
     // 多次尝试注入脚本
@@ -135,7 +137,9 @@ function safeDownload(url){
   // windows 禁止字符
   name=name.replace(/[<>:"/\\|?*]/g,'_');
   try{
-    chrome.downloads.download({url,filename:name,conflictAction:'uniquify'});
+    // 如果有当前关键词，创建对应文件夹
+    const folder = currentKeyword ? `小红书下载/${currentKeyword}/` : '';
+    chrome.downloads.download({url,filename:folder+name,conflictAction:'uniquify'});
   }catch(e){
     console.warn('downloads.download failed',e);
     try{chrome.downloads.download({url,conflictAction:'uniquify'});}catch{}

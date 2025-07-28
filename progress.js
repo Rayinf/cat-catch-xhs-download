@@ -31,26 +31,39 @@ document.getElementById('keyword').addEventListener('input', function() {
 async function loadKeywordHistory(keyword) {
   try {
     const tabs = await chrome.tabs.query({url: '*://*.xiaohongshu.com/*'});
-    if(tabs.length === 0) {
-      document.getElementById('keyword-history-section').style.display = 'none';
-      return;
+    let list = [];
+    
+    if(tabs.length > 0) {
+      // 尝试从 content script 获取
+      try {
+        const response = await chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'get-downloaded-by-keyword',
+          keyword: keyword
+        });
+        if(response && response.list) {
+          list = response.list;
+        }
+      } catch(contentError) {
+        // 如果 content script 不可用，从本地存储读取
+        const result = await chrome.storage.local.get('downloadedByKeyword');
+        const data = result.downloadedByKeyword || {};
+        list = data[keyword] || [];
+      }
+    } else {
+      // 没有小红书页面时，直接从本地存储读取
+      const result = await chrome.storage.local.get('downloadedByKeyword');
+      const data = result.downloadedByKeyword || {};
+      list = data[keyword] || [];
     }
     
-    const response = await chrome.tabs.sendMessage(tabs[0].id, {
-      type: 'get-downloaded-by-keyword',
-      keyword: keyword
-    });
+    document.getElementById('current-keyword-display').textContent = keyword;
+    document.getElementById('keyword-downloaded-count').textContent = list.length;
     
-    if(response && response.list) {
-      document.getElementById('current-keyword-display').textContent = keyword;
-      document.getElementById('keyword-downloaded-count').textContent = response.list.length;
-      
-      listKeywordDownloadedEl.innerHTML = response.list.map(id => {
-        return `<div class="list-item"><a href="https://www.xiaohongshu.com/explore/${id}" target="_blank">${id}</a></div>`;
-      }).join('');
-      
-      document.getElementById('keyword-history-section').style.display = response.list.length > 0 ? 'block' : 'none';
-    }
+    listKeywordDownloadedEl.innerHTML = list.map(id => {
+      return `<div class="list-item"><a href="https://www.xiaohongshu.com/explore/${id}" target="_blank">${id}</a></div>`;
+    }).join('');
+    
+    document.getElementById('keyword-history-section').style.display = list.length > 0 ? 'block' : 'none';
   } catch(error) {
     console.log('无法获取关键词历史:', error);
     document.getElementById('keyword-history-section').style.display = 'none';
@@ -64,18 +77,108 @@ document.getElementById('btn-clear-keyword').addEventListener('click', async fun
   
   if(confirm(`确定要清除关键词"${keyword}"的所有下载记录吗？`)) {
     try {
+      // 先尝试通知 content script（如果有的话）
       const tabs = await chrome.tabs.query({url: '*://*.xiaohongshu.com/*'});
       if(tabs.length > 0) {
-        await chrome.tabs.sendMessage(tabs[0].id, {
-          type: 'clear-downloaded-by-keyword',
-          keyword: keyword
-        });
-        loadKeywordHistory(keyword); // 重新加载
-        append(`已清除关键词"${keyword}"的下载记录`);
+        try {
+          await chrome.tabs.sendMessage(tabs[0].id, {
+            type: 'clear-downloaded-by-keyword',
+            keyword: keyword
+          });
+        } catch(contentError) {
+          // content script 不可用时，直接操作本地存储
+          const result = await chrome.storage.local.get('downloadedByKeyword');
+          const data = result.downloadedByKeyword || {};
+          if(data[keyword]) {
+            delete data[keyword];
+            await chrome.storage.local.set({ downloadedByKeyword: data });
+          }
+        }
+      } else {
+        // 没有小红书页面时，直接操作本地存储
+        const result = await chrome.storage.local.get('downloadedByKeyword');
+        const data = result.downloadedByKeyword || {};
+        if(data[keyword]) {
+          delete data[keyword];
+          await chrome.storage.local.set({ downloadedByKeyword: data });
+        }
       }
+      loadKeywordHistory(keyword); // 重新加载
+      append(`已清除关键词"${keyword}"的下载记录`);
     } catch(error) {
       append(`清除失败: ${error.message}`);
     }
+  }
+});
+
+// 查看所有关键词记录
+document.getElementById('btn-show-all-history').addEventListener('click', async function() {
+  try {
+    // 直接从本地存储读取数据
+    const result = await chrome.storage.local.get('downloadedByKeyword');
+    const data = result.downloadedByKeyword || {};
+    showAllHistoryModal(data);
+  } catch(error) {
+    alert('获取记录失败: ' + error.message);
+  }
+});
+
+// 显示所有历史记录弹窗
+function showAllHistoryModal(data) {
+  const modal = document.getElementById('all-history-modal');
+  const listEl = document.getElementById('all-keywords-list');
+  
+  const keywords = Object.keys(data);
+  if(keywords.length === 0) {
+    listEl.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">暂无下载记录</p>';
+  } else {
+    listEl.innerHTML = keywords.map(keyword => {
+      const list = data[keyword] || [];
+      return `
+        <div class="keyword-item">
+          <h4>${keyword}</h4>
+          <div class="keyword-meta">已下载 ${list.length} 个视频</div>
+          <div class="keyword-list">
+            ${list.map(id => `<div class="list-item"><a href="https://www.xiaohongshu.com/explore/${id}" target="_blank">${id}</a></div>`).join('')}
+          </div>
+          <button class="btn btn-secondary" style="font-size:12px;padding:4px 8px;margin-top:8px;" onclick="clearKeywordRecord('${keyword}')">清除记录</button>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  modal.style.display = 'flex';
+}
+
+// 清除指定关键词记录
+async function clearKeywordRecord(keyword) {
+  if(confirm(`确定要清除关键词"${keyword}"的所有下载记录吗？`)) {
+    try {
+      // 直接从本地存储删除
+      const result = await chrome.storage.local.get('downloadedByKeyword');
+      const data = result.downloadedByKeyword || {};
+      if(data[keyword]) {
+        delete data[keyword];
+        await chrome.storage.local.set({ downloadedByKeyword: data });
+        // 重新加载弹窗数据
+        showAllHistoryModal(data);
+        append(`已清除关键词"${keyword}"的下载记录`);
+      }
+    } catch(error) {
+      alert('清除失败: ' + error.message);
+    }
+  }
+}
+
+// 关闭弹窗
+document.getElementById('close-modal').addEventListener('click', function() {
+  document.getElementById('all-history-modal').style.display = 'none';
+});
+
+// 点击弹窗外部关闭
+document.getElementById('all-history-modal').addEventListener('click', function(e) {
+  if(e.target === this) {
+    this.style.display = 'none';
   }
 });
 

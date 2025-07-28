@@ -264,8 +264,25 @@ async function clickPlayAndDownload(anchor, keyword){
 
   if(url){
     safeSend({type:'progress',text:`捕获到流 ${url.split('/').pop()}`});
-    // 通知 background 立即下载
-    chrome.runtime.sendMessage({type:'resource-captured',url});
+    // 首先尝试使用前台 fetch+blob 携带正确 Referer 下载，避免被禁止
+    try{
+      await downloadBlob(url, `${noteId||Date.now()}.mp4`);
+    }catch(err){
+      console.warn('blob download failed',err);
+      // fallback: 再次等待新的 /stream/ 流出现
+      try{
+        const stream2 = await waitForStream(5000);
+        if(stream2){
+          safeSend({type:'progress',text:`二次捕获 ${stream2.split('/').pop()}`});
+          try{await downloadBlob(stream2, `${noteId||Date.now()}_2.mp4`);}catch(e){
+            chrome.runtime.sendMessage({type:'resource-captured',url:stream2});
+          }
+          return stream2;
+        }
+      }catch{}
+      // 最终交由 background 下载
+      chrome.runtime.sendMessage({type:'resource-captured',url});
+    }
     return url;
   }
   return null;
@@ -331,18 +348,26 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
 }
 
 async function downloadBlob(url, filename) {
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(resp.status);
+  let resp = await fetch(url,{credentials:'include'});
+  if(!resp.ok){
+    // 第二次尝试，不带凭证
+    resp = await fetch(url);
+    if(!resp.ok){
+      throw new Error(resp.status);
+    }
+  }
   const blob = await resp.blob();
   const objUrl = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = objUrl;
-  a.download = filename;
+  // 使用关键词创建文件夹路径
+  const folderName = CURRENT_KEYWORD ? `小红书下载-${CURRENT_KEYWORD}-` : '';
+  a.download = folderName + filename;
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(objUrl);
-  safeSend({type:'progress',text:`保存完成 ${filename}`});
+  safeSend({type:'progress',text:`保存完成 ${folderName}${filename}`});
 }
 
 /** 切换排序依据 */
@@ -459,6 +484,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     const keyword = msg.keyword;
     const list = downloadedByKeyword[keyword] || [];
     sendResponse({list});
+    return true;
+  }
+  // 获取所有关键词的下载记录
+  if(msg.type==='get-all-downloaded-keywords'){
+    sendResponse({data: downloadedByKeyword});
     return true;
   }
   // 清除指定关键词的已下载记录
