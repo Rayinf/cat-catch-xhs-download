@@ -1,7 +1,7 @@
 {
   "name": "猫抓·小红书批量下载",
   "description": "🐱 基于猫抓技术的小红书视频批量下载工具，支持关键词搜索、无水印下载、自动分类保存",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "manifest_version": 3,
   "icons": {
     "16": "icons/icon16.png",
