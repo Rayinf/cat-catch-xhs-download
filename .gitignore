@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+._*
+
+# Development files
+test-*.js
+test-*.json
+test.html
+
+# Backup files
+*-fixed.*
+
+# Documentation (keep only main docs)
+*修复*.md
+*指南*.md
+发布总结.md
+
+# Node modules
+node_modules/
+
+# Build files
+dist/
+build/
+
+# IDE files
+.vscode/
+.idea/
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp 
