@@ -6,6 +6,7 @@ const skippedSet=new Set();
 const titleMap={};
 const listCompletedEl=document.getElementById('list-completed');
 const listSkippedEl=document.getElementById('list-skipped');
+const listKeywordDownloadedEl=document.getElementById('list-keyword-downloaded');
 
 // 初始化
 renderList();
@@ -15,6 +16,68 @@ const params=new URLSearchParams(location.search);
 if(params.get('keyword')) document.getElementById('keyword').value = params.get('keyword');
 if(params.get('count')) document.getElementById('count').value = params.get('count');
 if(params.get('sort')) document.getElementById('sort').value = params.get('sort');
+
+// 关键词输入监听
+document.getElementById('keyword').addEventListener('input', function() {
+  const keyword = this.value.trim();
+  if(keyword) {
+    loadKeywordHistory(keyword);
+  } else {
+    document.getElementById('keyword-history-section').style.display = 'none';
+  }
+});
+
+// 加载关键词历史记录
+async function loadKeywordHistory(keyword) {
+  try {
+    const tabs = await chrome.tabs.query({url: '*://*.xiaohongshu.com/*'});
+    if(tabs.length === 0) {
+      document.getElementById('keyword-history-section').style.display = 'none';
+      return;
+    }
+    
+    const response = await chrome.tabs.sendMessage(tabs[0].id, {
+      type: 'get-downloaded-by-keyword',
+      keyword: keyword
+    });
+    
+    if(response && response.list) {
+      document.getElementById('current-keyword-display').textContent = keyword;
+      document.getElementById('keyword-downloaded-count').textContent = response.list.length;
+      
+      listKeywordDownloadedEl.innerHTML = response.list.map(id => {
+        return `<div class="list-item"><a href="https://www.xiaohongshu.com/explore/${id}" target="_blank">${id}</a></div>`;
+      }).join('');
+      
+      document.getElementById('keyword-history-section').style.display = response.list.length > 0 ? 'block' : 'none';
+    }
+  } catch(error) {
+    console.log('无法获取关键词历史:', error);
+    document.getElementById('keyword-history-section').style.display = 'none';
+  }
+}
+
+// 清除关键词记录
+document.getElementById('btn-clear-keyword').addEventListener('click', async function() {
+  const keyword = document.getElementById('keyword').value.trim();
+  if(!keyword) return;
+  
+  if(confirm(`确定要清除关键词"${keyword}"的所有下载记录吗？`)) {
+    try {
+      const tabs = await chrome.tabs.query({url: '*://*.xiaohongshu.com/*'});
+      if(tabs.length > 0) {
+        await chrome.tabs.sendMessage(tabs[0].id, {
+          type: 'clear-downloaded-by-keyword',
+          keyword: keyword
+        });
+        loadKeywordHistory(keyword); // 重新加载
+        append(`已清除关键词"${keyword}"的下载记录`);
+      }
+    } catch(error) {
+      append(`清除失败: ${error.message}`);
+    }
+  }
+});
 
 // 开始下载
 document.getElementById('btn-start').addEventListener('click', () => {
@@ -35,6 +98,9 @@ document.getElementById('btn-start').addEventListener('click', () => {
   append(`开始下载关键词：${keyword}，数量：${count}，排序：${sort}`);
   
   startDownload(keyword, count, sort);
+  
+  // 下载开始后重新加载关键词历史
+  setTimeout(() => loadKeywordHistory(keyword), 1000);
 });
 
 // 下载选中的跳过视频

@@ -36,18 +36,25 @@ function safeSend(message){
 }
 
 // === 新增：已下载记录持久化 ===
-const DOWNLOADED_KEY = 'downloadedNoteIds';
-let downloadedSet = new Set();
+const DOWNLOADED_BY_KEYWORD_KEY = 'downloadedByKeyword';
+let downloadedByKeyword = {};
+let currentKeywordSet = new Set();
 // 初始化时读取已下载列表
-chrome.storage.local.get(DOWNLOADED_KEY, res => {
-  const list = res[DOWNLOADED_KEY];
-  if (Array.isArray(list)) downloadedSet = new Set(list);
+chrome.storage.local.get(DOWNLOADED_BY_KEYWORD_KEY, res => {
+  downloadedByKeyword = res[DOWNLOADED_BY_KEYWORD_KEY] || {};
 });
+// 设置当前关键词并更新Set
+function setCurrentKeyword(keyword) {
+  CURRENT_KEYWORD = keyword;
+  const list = downloadedByKeyword[keyword] || [];
+  currentKeywordSet = new Set(list);
+}
 // 记录新下载
 function markDownloaded(noteId){
-  if(!noteId || downloadedSet.has(noteId)) return;
-  downloadedSet.add(noteId);
-  chrome.storage.local.set({ [DOWNLOADED_KEY]: Array.from(downloadedSet) });
+  if(!noteId || !CURRENT_KEYWORD || currentKeywordSet.has(noteId)) return;
+  currentKeywordSet.add(noteId);
+  downloadedByKeyword[CURRENT_KEYWORD] = Array.from(currentKeywordSet);
+  chrome.storage.local.set({ [DOWNLOADED_BY_KEYWORD_KEY]: downloadedByKeyword });
 }
 // === 新增结束 ===
 
@@ -285,7 +292,7 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
       try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=href;}
       const noteTitle=getNoteTitleFromAnchor(a);
       // 新增：已下载检测(跳过日志仅输出一次)
-      if(downloadedSet.has(noteId)) {
+      if(currentKeywordSet.has(noteId)) {
         if(!loggedSkipped.has(noteId)){
           loggedSkipped.add(noteId);
           safeSend({type:'progress',text:`已下载过 ${noteId} 跳过`,noteId,title:noteTitle,skipped:true});
@@ -386,7 +393,7 @@ function applySort(sortLabel){
 async function forceDownloadNoteIds(list){
   for(const noteId of list){
     if(!noteId) continue;
-    downloadedSet.delete(noteId); // 允许重新下载
+    currentKeywordSet.delete(noteId); // 允许重新下载
     try{
       const url = await fetchVideoUrl(noteId);
       if(url){
@@ -413,6 +420,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'collect-video-items') {
     CURRENT_KEYWORD = msg.keyword || 'xhs';
+    setCurrentKeyword(CURRENT_KEYWORD); // 更新当前关键词
     collectVideoItemsByClick(msg.maxCount || 20, CURRENT_KEYWORD, msg.offset||0)
       .then(items => sendResponse({ items }))
       .catch(error => sendResponse({ items: [], error: error.message }));
@@ -444,6 +452,27 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if(msg.type==='force-download-note-ids'){
     forceDownloadNoteIds(msg.noteIds||[]).then(()=>sendResponse({ok:true}));
+    return true;
+  }
+  // 获取指定关键词的已下载记录
+  if(msg.type==='get-downloaded-by-keyword'){
+    const keyword = msg.keyword;
+    const list = downloadedByKeyword[keyword] || [];
+    sendResponse({list});
+    return true;
+  }
+  // 清除指定关键词的已下载记录
+  if(msg.type==='clear-downloaded-by-keyword'){
+    const keyword = msg.keyword;
+    if(downloadedByKeyword[keyword]){
+      delete downloadedByKeyword[keyword];
+      chrome.storage.local.set({ [DOWNLOADED_BY_KEYWORD_KEY]: downloadedByKeyword });
+      // 如果是当前关键词，也清空Set
+      if(keyword === CURRENT_KEYWORD){
+        currentKeywordSet.clear();
+      }
+    }
+    sendResponse({ok:true});
     return true;
   }
 });

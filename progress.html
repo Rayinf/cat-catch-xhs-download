@@ -38,6 +38,9 @@
     .stat-item{text-align:center;padding:12px;background:#f8f9fa;border-radius:6px;flex:1;}
     .stat-number{font-size:20px;font-weight:600;color:#ff2c55;}
     .stat-label{font-size:12px;color:#666;margin-top:4px;}
+    .keyword-info{background:#f8f9fa;padding:12px;border-radius:6px;margin-bottom:12px;}
+    .keyword-info p{margin:4px 0;font-size:14px;}
+    .keyword-info span{font-weight:600;color:#ff2c55;}
   </style>
 </head>
 <body>
@@ -68,6 +71,15 @@
             </select>
           </div>
           <button id="btn-start" class="btn">开始下载</button>
+        </div>
+
+        <div class="section" id="keyword-history-section" style="display:none;">
+          <h3>关键词历史记录 <button id="btn-clear-keyword" class="btn btn-secondary" style="font-size:12px;padding:4px 8px;">清除记录</button></h3>
+          <div class="keyword-info">
+            <p>关键词：<span id="current-keyword-display"></span></p>
+            <p>已下载：<span id="keyword-downloaded-count">0</span> 个视频</p>
+          </div>
+          <div class="list-container" id="list-keyword-downloaded"></div>
         </div>
 
         <div class="section">
