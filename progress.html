@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>小红书批量下载进度</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;padding:20px;max-width:1200px;margin:0 auto;background:#fafafa;}
+    .container{background:white;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.1);overflow:hidden;}
+    .header{background:linear-gradient(135deg,#ff2c55,#ff6b8a);color:white;padding:20px;text-align:center;}
+    .header h1{margin:0;font-size:24px;font-weight:600;}
+    .header p{margin:8px 0 0;opacity:0.9;font-size:14px;}
+    .main-content{display:flex;gap:20px;}
+    .left-panel{flex:1;min-width:0;}
+    .right-panel{width:400px;flex-shrink:0;}
+    .section{padding:20px;border-bottom:1px solid #f0f0f0;}
+    .section:last-child{border-bottom:none;}
+    .right-panel .section{border-bottom:none;}
+    .form-row{display:flex;gap:12px;margin-bottom:12px;align-items:center;}
+    .form-row label{min-width:80px;font-weight:500;color:#333;}
+    .form-row input,.form-row select{flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;}
+    .btn{background:#ff2c55;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;transition:all 0.2s;}
+    .btn:hover{background:#e02349;transform:translateY(-1px);}
+    .btn-secondary{background:#666;color:white;}
+    .btn-secondary:hover{background:#555;}
+    .list-container{max-height:200px;overflow:auto;background:#f8f9fa;border:1px solid #e9ecef;border-radius:6px;padding:8px;}
+    .list-container:empty::before{content:'暂无内容';color:#999;font-style:italic;}
+    .list-item{padding:8px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;}
+    .list-item:last-child{border-bottom:none;}
+    .list-item a{color:#ff2c55;text-decoration:none;flex:1;}
+    .list-item a:hover{text-decoration:underline;}
+    .checkbox{margin-right:8px;}
+    .status{display:inline-block;padding:2px 6px;border-radius:4px;font-size:12px;color:white;}
+    .status.downloading{background:#28a745;}
+    .status.skipped{background:#ffc107;color:#333;}
+    .status.completed{background:#007bff;}
+    .log-area{height:500px;overflow:auto;background:#f5f5f5;padding:12px;font-family:Monaco,Consolas,monospace;font-size:13px;line-height:1.4;white-space:pre-wrap;border-radius:6px;margin:0;}
+    .stats{display:flex;gap:20px;margin-bottom:16px;}
+    .stat-item{text-align:center;padding:12px;background:#f8f9fa;border-radius:6px;flex:1;}
+    .stat-number{font-size:20px;font-weight:600;color:#ff2c55;}
+    .stat-label{font-size:12px;color:#666;margin-top:4px;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🐱 小红书批量下载</h1>
+      <p>基于猫抓技术的视频批量下载工具</p>
+    </div>
+    
+    <div class="main-content">
+      <div class="left-panel">
+        <div class="section">
+          <h3>下载配置</h3>
+          <div class="form-row">
+            <label>关键词：</label>
+            <input type="text" id="keyword" placeholder="如：旅行攻略、美食分享" />
+          </div>
+          <div class="form-row">
+            <label>下载数量：</label>
+            <input type="number" id="count" value="20" min="1" max="200" />
+            <label>排序：</label>
+            <select id="sort">
+              <option value="综合" selected>综合</option>
+              <option value="最新">最新</option>
+              <option value="最多点赞">最多点赞</option>
+              <option value="最多评论">最多评论</option>
+              <option value="最多收藏">最多收藏</option>
+            </select>
+          </div>
+          <button id="btn-start" class="btn">开始下载</button>
+        </div>
+
+        <div class="section">
+          <h3>下载统计</h3>
+          <div class="stats">
+            <div class="stat-item">
+              <div class="stat-number" id="stat-completed">0</div>
+              <div class="stat-label">已完成</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-number" id="stat-skipped">0</div>
+              <div class="stat-label">已跳过</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-number" id="stat-total">0</div>
+              <div class="stat-label">总计</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="section">
+          <h3>已完成下载</h3>
+          <div class="list-container" id="list-completed"></div>
+        </div>
+
+        <div class="section">
+          <h3>已跳过视频 <button id="btn-download-selected" class="btn btn-secondary" style="font-size:12px;padding:4px 8px;">下载选中</button></h3>
+          <div class="list-container" id="list-skipped"></div>
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <div class="section">
+          <h3>运行日志</h3>
+          <div class="log-area" id="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="progress.js"></script>
+</body>
+</html> 
