@@ -3,7 +3,7 @@
  */
 
 // 日志函数 - 复用progress.js的风格
-const DEBUG = false;
+const DEBUG = true;
 function append(text) {
   const el = document.getElementById('log');
   el.textContent += text + '\n';
@@ -189,9 +189,46 @@ async function openUserPageAndProcess(uid) {
   });
   
   // 等待页面加载完成
-  await sleep(8000); // 给更多时间加载用户页面
+  await sleep(5000);
+  
+  // 确保content script已注入并可用
+  await ensureContentScriptReady(tab.id);
   
   return tab;
+}
+
+// 确保content script准备就绪
+async function ensureContentScriptReady(tabId) {
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (attempts < maxAttempts) {
+    try {
+      // 尝试ping content script
+      const response = await sendMessageSafely({ type: 'ping' }, tabId);
+      if (response && response.pong) {
+        if(DEBUG) append(`Content script已就绪 (标签页 ${tabId})`);
+        return true;
+      }
+    } catch (error) {
+      // 如果失败，尝试注入content script
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tabId },
+          files: ['content.js']
+        });
+        if(DEBUG) append(`Content script已注入到标签页 ${tabId}`);
+        await sleep(1000); // 等待注入完成
+      } catch (injectError) {
+        if(DEBUG) append(`注入content script失败: ${injectError.message}`);
+      }
+    }
+    
+    attempts++;
+    await sleep(1000);
+  }
+  
+  throw new Error(`Content script未能在标签页 ${tabId} 中准备就绪`);
 }
 
 // 开始批量下载
@@ -304,6 +341,7 @@ async function processUser(uid) {
     
     // 获取真实用户名
     try {
+      if(DEBUG) append(`正在获取用户信息...`);
       const userInfoResp = await sendMessageSafely({
         type: 'getUserInfo',
         uid: uid
@@ -316,10 +354,12 @@ async function processUser(uid) {
           ...currentRecord,
           username: userInfoResp.username
         });
-        if(DEBUG) append(`获取到用户名: ${userInfoResp.username}`);
+        append(`获取到用户名: ${userInfoResp.username}`);
+      } else {
+        if(DEBUG) append(`使用UID作为用户名: ${uid}`);
       }
     } catch (userInfoError) {
-      if(DEBUG) append(`获取用户名失败: ${userInfoError.message}`);
+      append(`获取用户名失败，将使用UID: ${userInfoError.message}`);
     }
     
     // 获取用户设置的下载数量
