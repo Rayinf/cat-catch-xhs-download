@@ -3,6 +3,7 @@
  */
 
 // 日志函数 - 复用progress.js的风格
+const DEBUG = false;
 function append(text) {
   const el = document.getElementById('log');
   el.textContent += text + '\n';
@@ -140,7 +141,7 @@ function sendMessageSafely(message, retries = 3) {
     
     function tryMessage() {
       attempts++;
-      append(`发送消息尝试 ${attempts}/${retries + 1}: ${message.type}`);
+      if(DEBUG) append(`发送消息尝试 ${attempts}/${retries + 1}: ${message.type}`);
       
       chrome.runtime.sendMessage(message, (response) => {
         if (chrome.runtime.lastError) {
@@ -153,7 +154,7 @@ function sendMessageSafely(message, retries = 3) {
             reject(new Error(`消息发送失败，已重试 ${retries} 次: ${error}`));
           }
         } else {
-          append(`消息发送成功 (尝试 ${attempts}): ${response ? 'ok' : 'failed'}`);
+          if(DEBUG) append(`消息发送成功 (尝试 ${attempts}): ${response ? 'ok' : 'failed'}`);
           resolve(response);
         }
       });
@@ -167,7 +168,7 @@ function sendMessageSafely(message, retries = 3) {
 async function ensureBackgroundReady() {
   try {
     await wakeUpBackground();
-    append('Background script已就绪');
+    if(DEBUG) append('Background script已就绪');
     return true;
   } catch (error) {
     append(`Background script连接失败: ${error.message}`);
@@ -499,7 +500,7 @@ async function processUser(uid) {
     if (userTab && userTab.id) {
       try {
         chrome.tabs.remove(userTab.id);
-        append(`已关闭用户 ${uid} 的标签页`);
+        if(DEBUG) append(`已关闭用户 ${uid} 的标签页`);
       } catch (closeError) {
         append(`关闭标签页失败: ${closeError.message}`);
       }
