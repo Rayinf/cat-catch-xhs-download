@@ -53,6 +53,21 @@ function initializeUI() {
   document.getElementById('btn-clear-records').addEventListener('click', clearDownloadRecords);
   document.getElementById('btn-view-records').addEventListener('click', showDownloadRecords);
   document.getElementById('btn-close-records').addEventListener('click', hideDownloadRecords);
+  document.getElementById('btn-show-all-users').addEventListener('click', showAllUsersModal);
+  
+  // 新增：绑定清除当前用户记录按钮
+  document.getElementById('btn-clear-current').addEventListener('click', clearCurrentUserRecord);
+  
+  // 新增：绑定模态框关闭事件
+  document.getElementById('close-all-users-modal').addEventListener('click', hideAllUsersModal);
+  
+  // 模态框背景点击关闭
+  document.getElementById('records-modal').addEventListener('click', function(e) {
+    if (e.target === this) hideDownloadRecords();
+  });
+  document.getElementById('all-users-modal').addEventListener('click', function(e) {
+    if (e.target === this) hideAllUsersModal();
+  });
 }
 
 // 解析UID输入，支持多种格式
@@ -201,35 +216,49 @@ async function openUserPageAndProcess(uid) {
 async function ensureContentScriptReady(tabId) {
   let attempts = 0;
   const maxAttempts = 10;
-  
+
+  // 使用 chrome.tabs.sendMessage ping 指定标签页中的 content script
+  async function pingContent() {
+    return new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tabId, { type: 'ping' }, (resp) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve(resp);
+        }
+      });
+    });
+  }
+
   while (attempts < maxAttempts) {
     try {
-      // 尝试ping content script
-      const response = await sendMessageSafely({ type: 'ping' }, tabId);
+      const response = await pingContent();
       if (response && response.pong) {
-        if(DEBUG) append(`Content script已就绪 (标签页 ${tabId})`);
+        if (DEBUG) append(`Content script已就绪 (标签页 ${tabId})`);
         return true;
       }
-    } catch (error) {
-      // 如果失败，尝试注入content script
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tabId },
-          files: ['content.js']
-        });
-        if(DEBUG) append(`Content script已注入到标签页 ${tabId}`);
-        await sleep(1000); // 等待注入完成
-      } catch (injectError) {
-        if(DEBUG) append(`注入content script失败: ${injectError.message}`);
-      }
+    } catch (_) {
+      // ignore and prepare to inject script
     }
-    
+
+    // 如果 ping 失败，尝试重新注入 content script
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ['content.js']
+      });
+      if (DEBUG) append(`已尝试注入content script到标签页 ${tabId}`);
+    } catch (injectError) {
+      if (DEBUG) append(`注入content script失败: ${injectError.message}`);
+    }
+
     attempts++;
     await sleep(1000);
   }
-  
+
   throw new Error(`Content script未能在标签页 ${tabId} 中准备就绪`);
 }
+
 
 // 开始批量下载
 async function startBatchDownload() {
@@ -337,12 +366,16 @@ async function processUser(uid) {
       lastUpdate: new Date().toLocaleString()
     });
     
-    append(`用户页面已打开，开始收集笔记信息...`);
+    // 显示当前处理用户信息
+    showCurrentUserInfo(uid);
     
-    // 延后获取用户名，在收集笔记信息时一起获取
+    append(`用户页面已打开，开始收集笔记信息...`);
     
     // 获取用户设置的下载数量
     const downloadCount = parseInt(document.getElementById('download-count').value) || 20;
+    
+    // 获取自定义文件夹名称（如果有）
+    const customFolderName = document.getElementById('folder-name').value.trim();
     
     // 在用户页面上收集笔记信息 - 使用与progress.html相同的方式
     const notes = await new Promise((resolve, reject) => {
@@ -352,8 +385,7 @@ async function processUser(uid) {
           type: 'collect-video-items',
           keyword: `user_${uid}`,
           maxCount: downloadCount,
-          offset: 0,
-          quiet: true
+          offset: 0
         }, (response) => {
           if (chrome.runtime.lastError) {
             append(`页面通信失败: ${chrome.runtime.lastError.message}`);
@@ -367,6 +399,16 @@ async function processUser(uid) {
                 username: response.username
               });
               append(`获取到用户名: ${response.username}`);
+              
+              // 使用自定义文件夹名称或用户名
+              const folderName = customFolderName || response.username;
+              sendMessageSafely({type:'set-folder',folder: folderName});
+              
+              // 更新当前用户显示
+              updateCurrentUserDisplay(uid, response.username);
+            } else if (customFolderName) {
+              // 如果有自定义文件夹名称，使用它
+              sendMessageSafely({type:'set-folder',folder: customFolderName});
             }
             
             const noteList = response.items.map(item => ({
@@ -421,14 +463,15 @@ async function processUser(uid) {
       totalNotes: notes.length
     });
     
-    // 直接下载收集到的视频流（模仿progress.html）
+// 已在用户页面触发播放并由background捕获流下载（流程与progress一致）
     let downloadedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
     
     append(`开始下载用户 ${uid} 的 ${notes.length} 个视频...`);
     
-    for (let j = 0; j < notes.length; j++) {
+    /* 手动下载逻辑已移除，依赖页面自动下载
+
       if (!isRunning) break;
       
 
@@ -517,8 +560,78 @@ async function processUser(uid) {
       
       // 短暂延迟避免请求过于频繁
       await sleep(500);
+    }*/
+    // === 手动下载无水印逻辑 ===
+    for (let j = 0; j < notes.length && isRunning; j++) {
+      const note = notes[j];
+
+      try {
+        // 检查是否已下载
+        const alreadyDownloaded = await isNoteDownloaded(uid, note.id);
+        if (alreadyDownloaded) {
+          skippedCount++;
+          stats.skippedNotes++;
+
+          if (note.title) titleMap[note.id] = note.title;
+          skippedSet.add(note.id);
+
+          append(`跳过已下载: ${note.title || note.id}`);
+        } else {
+          const userRecord = userRecords.get(uid);
+          const folderName = userRecord?.username || uid;
+          const bgResp = await sendMessageSafely({
+            type: 'xhs-download-single',
+            noteId: note.id,
+            title: note.title,
+            uid: uid,
+            username: folderName
+          });
+
+          if (bgResp && bgResp.ok) {
+            downloadedCount++;
+            stats.downloadedNotes++;
+            await markNoteDownloaded(uid, note.id);
+            if (note.title) titleMap[note.id] = note.title;
+            completedSet.add(note.id);
+
+            append(`✅ 无水印下载完成: ${note.title || note.id}`);
+          } else {
+            failedCount++;
+            stats.failedNotes++;
+            if (note.title) titleMap[note.id] = note.title;
+            skippedSet.add(note.id);
+            append(`⚠️ 下载失败: ${note.title || note.id}`);
+          }
+        }
+      } catch (error) {
+        failedCount++;
+        stats.failedNotes++;
+        append(`❌ 下载异常: ${note.id} - ${error.message}`);
+        if (note.title) titleMap[note.id] = note.title;
+        skippedSet.add(note.id);
+      }
+
+      // 更新进度
+      const progressPercent = Math.round(((j + 1) / notes.length) * 100);
+      const userRecord = userRecords.get(uid);
+      userRecords.set(uid, {
+        ...userRecord,
+        progress: progressPercent,
+        downloaded: downloadedCount,
+        skipped: skippedCount,
+        failed: failedCount,
+        totalNotes: notes.length,
+        lastUpdate: new Date().toLocaleString()
+      });
+
+      // 更新当前用户显示进度
+      updateCurrentUserDisplay(uid, userRecord.username);
+      renderLists();
+
+      // 略微延迟，避免压垮接口
+      await sleep(300);
     }
-    
+
     // 标记用户完成
     currentUserRecord = userRecords.get(uid);
     userRecords.set(uid, {
@@ -835,6 +948,160 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
+// 显示当前处理用户信息
+function showCurrentUserInfo(uid) {
+  const section = document.getElementById('current-user-section');
+  const userRecord = userRecords.get(uid);
+  
+  if (userRecord) {
+    document.getElementById('current-user-display').textContent = userRecord.username;
+    document.getElementById('current-user-downloaded-count').textContent = userRecord.downloaded || 0;
+    document.getElementById('current-user-progress').textContent = userRecord.progress + '%';
+    section.style.display = 'block';
+  }
+}
+
+// 更新当前用户显示
+function updateCurrentUserDisplay(uid, username) {
+  document.getElementById('current-user-display').textContent = username || uid;
+  
+  // 更新当前用户下载列表
+  const userRecord = userRecords.get(uid);
+  if (userRecord) {
+    document.getElementById('current-user-downloaded-count').textContent = userRecord.downloaded || 0;
+    document.getElementById('current-user-progress').textContent = userRecord.progress + '%';
+  }
+}
+
+// 清除当前用户记录
+async function clearCurrentUserRecord() {
+  const currentUid = currentUsers[currentUserIndex];
+  if (!currentUid) {
+    append('没有正在处理的用户');
+    return;
+  }
+  
+  if (confirm(`确定要清除用户 ${currentUid} 的下载记录吗？`)) {
+    try {
+      // 清除存储中的记录
+      await new Promise((resolve) => {
+        chrome.storage.local.remove(`downloaded_${currentUid}`, resolve);
+      });
+      
+      // 清除内存中的记录
+      const userRecord = userRecords.get(currentUid);
+      if (userRecord) {
+        userRecords.set(currentUid, {
+          ...userRecord,
+          downloaded: 0,
+          progress: 0
+        });
+      }
+      
+      updateCurrentUserDisplay(currentUid, userRecord?.username);
+      append(`已清除用户 ${currentUid} 的下载记录`);
+    } catch (error) {
+      append(`清除记录失败: ${error.message}`);
+    }
+  }
+}
+
+// 显示所有用户下载记录模态框
+async function showAllUsersModal() {
+  const modal = document.getElementById('all-users-modal');
+  const listEl = document.getElementById('all-users-list');
+  
+  try {
+    // 获取所有存储的key
+    const allKeys = await new Promise((resolve) => {
+      chrome.storage.local.get(null, (result) => {
+        resolve(Object.keys(result));
+      });
+    });
+    
+    // 找出所有下载记录的key（格式为 downloaded_uid）
+    const downloadKeys = allKeys.filter(key => key.startsWith('downloaded_'));
+    
+    if (downloadKeys.length === 0) {
+      listEl.innerHTML = '<p style="text-align:center;color:#999;padding:20px;">暂无下载记录</p>';
+    } else {
+      // 获取所有下载记录
+      const records = await new Promise((resolve) => {
+        chrome.storage.local.get(downloadKeys, (result) => {
+          resolve(result);
+        });
+      });
+      
+      // 构建HTML，类似progress.html的风格
+      const userList = Object.keys(records).map(key => {
+        const uid = key.replace('downloaded_', '');
+        const noteIds = records[key] || [];
+        const userRecord = userRecords.get(uid);
+        const username = userRecord?.username || uid;
+        
+        return {
+          uid,
+          username,
+          noteIds,
+          count: noteIds.length
+        };
+      });
+      
+      listEl.innerHTML = userList.map(user => {
+        return `
+          <div class="keyword-item">
+            <h4>${user.username}</h4>
+            <div class="keyword-meta">已下载 ${user.count} 个视频 (UID: ${user.uid})</div>
+            <div class="keyword-list">
+              ${user.noteIds.map(id => `<div class="list-item"><a href="https://www.xiaohongshu.com/explore/${id}" target="_blank">${titleMap[id] || id}</a></div>`).join('')}
+            </div>
+            <button class="btn btn-secondary" style="font-size:12px;padding:4px 8px;margin-top:8px;" onclick="clearUserRecord('${user.uid}')">清除记录</button>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    modal.style.display = 'flex';
+  } catch (error) {
+    listEl.innerHTML = `<p style="text-align:center;color:#dc3545;padding:20px;">加载失败: ${error.message}</p>`;
+    modal.style.display = 'flex';
+  }
+}
+
+// 清除指定用户记录
+async function clearUserRecord(uid) {
+  if (confirm(`确定要清除用户 ${uid} 的所有下载记录吗？`)) {
+    try {
+      // 清除存储中的记录
+      await new Promise((resolve) => {
+        chrome.storage.local.remove(`downloaded_${uid}`, resolve);
+      });
+      
+      // 清除内存中的记录
+      const userRecord = userRecords.get(uid);
+      if (userRecord) {
+        userRecords.set(uid, {
+          ...userRecord,
+          downloaded: 0,
+          progress: 0
+        });
+      }
+      
+      append(`已清除用户 ${uid} 的下载记录`);
+      
+      // 重新加载模态框数据
+      showAllUsersModal();
+    } catch (error) {
+      alert('清除失败: ' + error.message);
+    }
+  }
+}
+
+// 隐藏所有用户模态框
+function hideAllUsersModal() {
+  document.getElementById('all-users-modal').style.display = 'none';
+}
+
 // 工具函数：延迟
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -856,7 +1123,7 @@ chrome.runtime.onMessage.addListener((msg) => {
         skippedSet.delete(msg.noteId);
       }
       
-      renderVideoLists();
+      renderLists();
     }
   }
 });

@@ -71,6 +71,13 @@
     .note-title{flex:1;color:#333;}
     .note-meta{font-size:12px;color:#666;}
     .checkbox{margin-right:8px;}
+    .keyword-info{background:#f8f9fa;padding:12px;border-radius:6px;margin-bottom:12px;}
+    .keyword-info p{margin:4px 0;font-size:14px;}
+    .keyword-info span{font-weight:600;color:#ff2c55;}
+    .keyword-item{margin-bottom:16px;padding:12px;border:1px solid #eee;border-radius:8px;}
+    .keyword-item h4{margin:0 0 8px;color:#ff2c55;font-size:16px;}
+    .keyword-meta{color:#666;font-size:14px;margin-bottom:8px;}
+    .keyword-list{max-height:150px;overflow-y:auto;}
   </style>
 </head>
 <body>
@@ -86,11 +93,15 @@
           <h3>用户UID配置</h3>
           <div class="form-row">
             <label>UID列表：</label>
-            <textarea id="uid-input"></textarea>
+            <textarea id="uid-input" placeholder="输入用户UID，每行一个&#10;支持格式：&#10;- 完整链接：https://www.xiaohongshu.com/user/profile/xxx&#10;- 纯UID：24位十六进制字符"></textarea>
           </div>
           <div class="form-row">
             <label>下载数量：</label>
             <input type="number" id="download-count" value="20" min="1" max="500" placeholder="每个用户下载的笔记数量" />
+          </div>
+          <div class="form-row">
+            <label>文件夹名称：</label>
+            <input type="text" id="folder-name" placeholder="留空则使用用户名作为文件夹" />
           </div>
           <div class="form-row">
             <label>文件导入：</label>
@@ -100,7 +111,18 @@
             <button id="btn-start" class="btn">开始批量下载</button>
             <button id="btn-clear-records" class="btn btn-secondary">清除下载记录</button>
             <button id="btn-view-records" class="btn btn-secondary">查看下载记录</button>
+            <button id="btn-show-all-users" class="btn btn-secondary">查看所有用户记录</button>
           </div>
+        </div>
+
+        <div class="section" id="current-user-section" style="display:none;">
+          <h3>当前处理用户 <button id="btn-clear-current" class="btn btn-secondary" style="font-size:12px;padding:4px 8px;">清除记录</button></h3>
+          <div class="uid-info">
+            <p>用户名：<span id="current-user-display"></span></p>
+            <p>已下载：<span id="current-user-downloaded-count">0</span> 个视频</p>
+            <p>进度：<span id="current-user-progress">0%</span></p>
+          </div>
+          <div class="list-container" id="list-current-user-downloaded"></div>
         </div>
 
         <div class="section">
@@ -128,6 +150,7 @@
           <h3>已完成下载</h3>
           <div class="list-container" id="list-completed"></div>
         </div>
+
         <div class="section">
           <h3>已跳过视频 <button id="btn-download-selected" class="btn btn-secondary" style="font-size:12px;padding:4px 8px;">下载选中</button></h3>
           <div class="list-container" id="list-skipped"></div>
@@ -144,14 +167,29 @@
   </div>
 
   <!-- 下载记录模态框 -->
-  <div id="records-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;">
-    <div style="position:relative;margin:5% auto;width:80%;max-width:800px;background:white;border-radius:8px;padding:20px;max-height:80vh;overflow:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid #eee;padding-bottom:15px;">
-        <h2 style="margin:0;color:#333;">下载记录详情</h2>
-        <button id="btn-close-records" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666;padding:0;width:30px;height:30px;display:flex;align-items:center;justify-content:center;">&times;</button>
+  <div id="records-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>用户下载记录详情</h3>
+        <button id="btn-close-records" class="btn-close">&times;</button>
       </div>
-      <div id="records-content">
-        <p style="text-align:center;color:#666;padding:40px;">加载中...</p>
+      <div class="modal-body">
+        <div id="records-content">
+          <p style="text-align:center;color:#666;padding:40px;">加载中...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 所有用户下载记录弹窗 -->
+  <div id="all-users-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>所有用户下载记录</h3>
+        <button id="close-all-users-modal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="all-users-list"></div>
       </div>
     </div>
   </div>

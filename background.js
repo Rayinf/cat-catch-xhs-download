@@ -130,6 +130,7 @@ async function downloadByKeyword(keyword, maxCount = 20, sortLabel = '综合', o
 
 // 捕获无水印 stream mp4
 const captured = new Set();
+let currentBatchFolder = '';
 
 // helper
 function safeDownload(url){
@@ -138,7 +139,7 @@ function safeDownload(url){
   name=name.replace(/[<>:"/\\|?*]/g,'_');
   try{
     // 如果有当前关键词，创建对应文件夹
-    const folder = currentKeyword ? `小红书下载/${currentKeyword}/` : '';
+    const folder = currentBatchFolder ? `小红书下载/${currentBatchFolder}/` : (currentKeyword ? `小红书下载/${currentKeyword}/` : '');
     chrome.downloads.download({url,filename:folder+name,conflictAction:'uniquify'});
   }catch(e){
     console.warn('downloads.download failed',e);
@@ -147,7 +148,7 @@ function safeDownload(url){
 }
 
 // 用户批量下载专用的下载函数，按用户名创建文件夹
-function safeDownloadWithFolder(url, title, folderName){
+function safeDownloadWithFolder(url, title, folderName, noteId){
   let name = title || url.split('/').pop().split('?')[0].split('#')[0] || `video_${Date.now()}.mp4`;
   // 确保文件名有扩展名
   if (!name.includes('.')) {
@@ -162,8 +163,26 @@ function safeDownloadWithFolder(url, title, folderName){
     const folder = `小红书下载/${folderName}/`;
     chrome.downloads.download({url, filename: folder + name, conflictAction: 'uniquify'});
     console.log(`开始下载到文件夹 ${folder}: ${name}`);
+    
+    // 发送进度消息到前台
+    chrome.runtime.sendMessage({
+      type: 'progress',
+      text: `✅ 下载开始: ${title || noteId}`,
+      noteId: noteId,
+      title: title,
+      download: true
+    }, () => void chrome.runtime.lastError);
+    
   }catch(e){
     console.warn('downloads.download failed',e);
+    // 发送失败消息
+    chrome.runtime.sendMessage({
+      type: 'progress',
+      text: `❌ 下载失败: ${title || noteId}`,
+      noteId: noteId,
+      title: title,
+      skipped: true
+    }, () => void chrome.runtime.lastError);
     try{chrome.downloads.download({url, conflictAction:'uniquify'});}catch{}
   }
 }
@@ -208,6 +227,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   
+    // 设置当前批次文件夹
+  if(msg.type==='set-folder'){
+    currentBatchFolder = msg.folder || '';
+    sendResponse({ok:true});
+    return true;
+  }
   // 处理ping消息，用于唤醒service worker
   if (msg.type === 'ping') {
     console.log('Responding to ping');
@@ -258,7 +283,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         if(videoUrl){
           // 使用用户名作为文件夹名称，类似progress.html的逻辑
           const folderName = username || uid;
-          safeDownloadWithFolder(videoUrl, title || noteId, folderName);
+          safeDownloadWithFolder(videoUrl, title || noteId, folderName, noteId);
           sendResponse({ok:true,url:videoUrl});
         } else {
           sendResponse({ok:false,error:'无法获取下载链接'});
