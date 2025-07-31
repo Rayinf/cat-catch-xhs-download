@@ -420,22 +420,22 @@ async function processUser(uid) {
               completedSet.add(note.id);
               append(`无水印下载: ${note.title || note.id}`);
             } else {
-              // 无法获取无水印链接，跳过该视频
+              // 无法获取无水印链接，静默跳过该视频
               failedCount++;
               stats.failedNotes++;
               if (note.title) titleMap[note.id] = note.title;
               skippedSet.add(note.id);
-              append(`无水印链接获取失败，已跳过: ${note.title || note.id}`);
+              // 不输出任何日志，静默跳过
             }
           } catch (downloadError) {
             failedCount++;
             stats.failedNotes++;
             if (note.title) titleMap[note.id] = note.title;
             skippedSet.add(note.id);
-            append(`下载失败: ${note.title || note.id} - ${downloadError.message}`);
+            // 静默处理下载异常，不输出日志
           }
         } else {
-          // 没有URL的视频归入失败
+          // 没有URL的视频静默跳过
           failedCount++;
           stats.failedNotes++;
           
@@ -443,7 +443,7 @@ async function processUser(uid) {
           if (note.title) titleMap[note.id] = note.title;
           skippedSet.add(note.id);
           
-          append(`无视频链接: ${note.title || note.id}`);
+          // 静默跳过无链接的视频
         }
       } catch (error) {
         failedCount++;
