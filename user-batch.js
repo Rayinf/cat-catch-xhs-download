@@ -419,20 +419,12 @@ async function processUser(uid) {
               completedSet.add(note.id);
               append(`无水印下载: ${note.title || note.id}`);
             } else {
-              // 背景下载失败，退回水印 stream 链接
-              const cleanTitle = (note.title || note.id).replace(/[<>:"/\\|?*]/g,'_');
-              const filename = `小红书下载/${folderName}/${cleanTitle}.mp4`;
-              chrome.downloads.download({
-                url: note.url,
-                filename: filename,
-                conflictAction: 'uniquify'
-              });
-              downloadedCount++;
-              stats.downloadedNotes++;
-              await markNoteDownloaded(uid, note.id);
+              // 无法获取无水印链接，跳过该视频
+              failedCount++;
+              stats.failedNotes++;
               if (note.title) titleMap[note.id] = note.title;
-              completedSet.add(note.id);
-              append(`(带水印)下载: ${note.title || note.id}`);
+              skippedSet.add(note.id);
+              append(`无水印链接获取失败，已跳过: ${note.title || note.id}`);
             }
           } catch (downloadError) {
             failedCount++;
