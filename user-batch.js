@@ -17,6 +17,7 @@ const userRecords = new Map(); // UID -> user info (保留用于文件夹名称)
 const completedSet = new Set();
 const skippedSet = new Set();
 const titleMap = {};
+const capturedVideos = new Set(); // 跟踪已经通过流捕获下载的视频
 let listCompletedEl;
 let listSkippedEl;
 
@@ -282,6 +283,7 @@ async function startBatchDownload() {
   // 重置统计
   completedSet.clear();
   skippedSet.clear();
+  capturedVideos.clear(); // 清空流捕获记录
   Object.keys(titleMap).forEach(key => delete titleMap[key]);
   userRecords.clear();
   
@@ -561,7 +563,7 @@ async function processUser(uid) {
       // 短暂延迟避免请求过于频繁
       await sleep(500);
     }*/
-    // === 手动下载无水印逻辑 ===
+    // === 智能下载逻辑：优先使用流捕获，备用API下载 ===
     for (let j = 0; j < notes.length && isRunning; j++) {
       const note = notes[j];
 
@@ -577,30 +579,59 @@ async function processUser(uid) {
 
           append(`跳过已下载: ${note.title || note.id}`);
         } else {
-          const userRecord = userRecords.get(uid);
-          const folderName = userRecord?.username || uid;
-          const bgResp = await sendMessageSafely({
-            type: 'xhs-download-single',
-            noteId: note.id,
-            title: note.title,
-            uid: uid,
-            username: folderName
-          });
-
-          if (bgResp && bgResp.ok) {
+          // 检查是否已经通过流捕获下载了
+          if (capturedVideos.has(note.id)) {
+            // 已经通过流捕获下载，直接标记为完成
             downloadedCount++;
             stats.downloadedNotes++;
             await markNoteDownloaded(uid, note.id);
             if (note.title) titleMap[note.id] = note.title;
             completedSet.add(note.id);
-
-            append(`✅ 无水印下载完成: ${note.title || note.id}`);
+            append(`✅ 流捕获已完成: ${note.title || note.id}`);
           } else {
-            failedCount++;
-            stats.failedNotes++;
-            if (note.title) titleMap[note.id] = note.title;
-            skippedSet.add(note.id);
-            append(`⚠️ 下载失败: ${note.title || note.id}`);
+            // 先尝试触发流捕获（模拟用户浏览行为）
+            // 给页面一些时间让用户自动浏览触发流捕获
+            append(`⏳ 等待流捕获: ${note.title || note.id}`);
+            
+            // 等待一段时间看是否会自动捕获
+            await sleep(2000);
+            
+            // 再次检查是否已通过流捕获
+            if (capturedVideos.has(note.id)) {
+              downloadedCount++;
+              stats.downloadedNotes++;
+              await markNoteDownloaded(uid, note.id);
+              if (note.title) titleMap[note.id] = note.title;
+              completedSet.add(note.id);
+              append(`✅ 流捕获成功: ${note.title || note.id}`);
+            } else {
+              // 流捕获失败，尝试API下载作为备用方案
+              const userRecord = userRecords.get(uid);
+              const folderName = userRecord?.username || uid;
+              const bgResp = await sendMessageSafely({
+                type: 'xhs-download-single',
+                noteId: note.id,
+                title: note.title,
+                uid: uid,
+                username: folderName
+              });
+
+              if (bgResp && bgResp.ok) {
+                downloadedCount++;
+                stats.downloadedNotes++;
+                await markNoteDownloaded(uid, note.id);
+                if (note.title) titleMap[note.id] = note.title;
+                completedSet.add(note.id);
+
+                append(`✅ API下载完成: ${note.title || note.id}`);
+              } else {
+                failedCount++;
+                stats.failedNotes++;
+                if (note.title) titleMap[note.id] = note.title;
+                skippedSet.add(note.id);
+                append(`⚠️ 下载失败: ${note.title || note.id}`);
+              }
+            }
           }
         }
       } catch (error) {
@@ -810,6 +841,7 @@ async function clearDownloadRecords() {
       // 清除内存中的记录
       completedSet.clear();
       skippedSet.clear();
+      capturedVideos.clear(); // 清空流捕获记录
       Object.keys(titleMap).forEach(key => delete titleMap[key]);
       userRecords.clear();
       
@@ -1121,9 +1153,43 @@ chrome.runtime.onMessage.addListener((msg) => {
       } else if (msg.download || msg.forced) {
         completedSet.add(msg.noteId);
         skippedSet.delete(msg.noteId);
+        // 标记为已通过流捕获下载
+        capturedVideos.add(msg.noteId);
       }
       
       renderLists();
+    }
+  }
+  
+  // 监听流捕获消息
+  if (msg.type === 'resource-captured' && msg.url) {
+    // 从URL中提取可能的noteId
+    // 尝试多种方式匹配noteId：
+    // 1. 直接从URL路径中匹配24位十六进制
+    // 2. 从文件名中匹配（如 01e82b0f3e4931330103700196e8345059_114.mp4）
+    let possibleNoteId = null;
+    
+    // 方法1：从URL路径匹配
+    const urlMatch = msg.url.match(/([a-fA-F0-9]{24})/);
+    if (urlMatch) {
+      possibleNoteId = urlMatch[1];
+    }
+    
+    // 方法2：从文件名匹配（处理类似 01e82b0f3e4931330103700196e8345059_114.mp4 的情况）
+    if (!possibleNoteId) {
+      const fileNameMatch = msg.url.match(/\/([a-fA-F0-9]{32})_\d+\.mp4/);
+      if (fileNameMatch) {
+        // 32位字符可能包含24位的noteId，尝试提取
+        const longId = fileNameMatch[1];
+        if (longId.length >= 24) {
+          possibleNoteId = longId.substring(0, 24);
+        }
+      }
+    }
+    
+    if (possibleNoteId) {
+      capturedVideos.add(possibleNoteId);
+      append(`✅ 流捕获标记: ${possibleNoteId}`);
     }
   }
 });
