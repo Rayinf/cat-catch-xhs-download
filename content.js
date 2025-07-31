@@ -442,8 +442,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     CURRENT_KEYWORD = msg.keyword || 'xhs';
     setCurrentKeyword(CURRENT_KEYWORD); // 更新当前关键词
     globalThis.__COLLECT_QUIET__ = !!msg.quiet;
+    
     collectVideoItemsByClick(msg.maxCount || 20, CURRENT_KEYWORD, msg.offset||0).finally(()=>{globalThis.__COLLECT_QUIET__=false;})
-      .then(items => sendResponse({ items }))
+      .then(items => {
+        // 同时获取用户名（如果在用户页面）
+        let username = null;
+        if (window.location.href.includes('/user/profile/')) {
+          const userNameElement = document.querySelector('.user-name');
+          if (userNameElement && userNameElement.textContent.trim()) {
+            username = userNameElement.textContent.trim();
+          }
+        }
+        sendResponse({ items, username });
+      })
       .catch(error => sendResponse({ items: [], error: error.message }));
     return true;
   }

@@ -3,7 +3,7 @@
  */
 
 // 日志函数 - 复用progress.js的风格
-const DEBUG = true;
+const DEBUG = false;
 function append(text) {
   const el = document.getElementById('log');
   el.textContent += text + '\n';
@@ -339,28 +339,7 @@ async function processUser(uid) {
     
     append(`用户页面已打开，开始收集笔记信息...`);
     
-    // 获取真实用户名
-    try {
-      if(DEBUG) append(`正在获取用户信息...`);
-      const userInfoResp = await sendMessageSafely({
-        type: 'getUserInfo',
-        uid: uid
-      }, userTab.id);
-      
-      if (userInfoResp && userInfoResp.username && userInfoResp.username !== uid) {
-        // 更新用户记录中的用户名
-        const currentRecord = userRecords.get(uid);
-        userRecords.set(uid, {
-          ...currentRecord,
-          username: userInfoResp.username
-        });
-        append(`获取到用户名: ${userInfoResp.username}`);
-      } else {
-        if(DEBUG) append(`使用UID作为用户名: ${uid}`);
-      }
-    } catch (userInfoError) {
-      append(`获取用户名失败，将使用UID: ${userInfoError.message}`);
-    }
+    // 延后获取用户名，在收集笔记信息时一起获取
     
     // 获取用户设置的下载数量
     const downloadCount = parseInt(document.getElementById('download-count').value) || 20;
@@ -380,6 +359,16 @@ async function processUser(uid) {
             append(`页面通信失败: ${chrome.runtime.lastError.message}`);
             resolve([]);
           } else if (response && response.items) {
+            // 获取用户名（如果有）
+            if (response.username && response.username !== uid) {
+              const currentRecord = userRecords.get(uid);
+              userRecords.set(uid, {
+                ...currentRecord,
+                username: response.username
+              });
+              append(`获取到用户名: ${response.username}`);
+            }
+            
             const noteList = response.items.map(item => ({
               id: item.noteId,
               title: item.title || item.noteId,
