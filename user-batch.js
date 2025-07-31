@@ -368,13 +368,12 @@ async function processUser(uid) {
       totalNotes: notes.length
     });
     
-    // 处理用户的所有笔记
+    // 直接下载收集到的视频流（模仿progress.html）
     let downloadedCount = 0;
     let skippedCount = 0;
     let failedCount = 0;
     
-    // 使用progress.html相同的下载方式
-    append(`开始批量下载用户 ${uid} 的 ${notes.length} 个笔记...`);
+    append(`开始下载用户 ${uid} 的 ${notes.length} 个视频...`);
     
     for (let j = 0; j < notes.length; j++) {
       if (!isRunning) break;
@@ -386,7 +385,6 @@ async function processUser(uid) {
       try {
         // 检查是否已下载
         const alreadyDownloaded = await isNoteDownloaded(uid, note.id);
-        append(`检查笔记 ${note.id} 下载状态: ${alreadyDownloaded ? '已下载' : '未下载'}`);
         
         if (alreadyDownloaded) {
           skippedCount++;
@@ -396,86 +394,31 @@ async function processUser(uid) {
           if (note.title) titleMap[note.id] = note.title;
           skippedSet.add(note.id);
           
-          append(`跳过已下载笔记: ${note.title || note.id}`);
-        } else {
-          // 使用与progress.html完全相同的下载方式
+          append(`跳过已下载: ${note.title || note.id}`);
+        } else if (note.url) {
+          // 直接使用收集到的视频流URL下载（和progress.html一样）
           try {
-            // 首先发送下载请求到background script
-            const userRecord = userRecords.get(uid);
-            append(`正在请求下载: ${note.title || note.id}`);
+            downloadedCount++;
+            stats.downloadedNotes++;
+            await markNoteDownloaded(uid, note.id);
             
-            const downloadRequest = await sendMessageSafely({
-              type: 'xhs-download-single',
-              noteId: note.id,
-              title: note.title,
-              uid: uid,
-              username: userRecord?.username || uid // 传递用户名用于创建文件夹
+            // 添加到视频级别记录
+            if (note.title) titleMap[note.id] = note.title;
+            completedSet.add(note.id);
+            
+            // 按用户名创建文件夹下载
+            const userRecord = userRecords.get(uid);
+            const folderName = userRecord?.username || uid;
+            const cleanTitle = (note.title || note.id).replace(/[<>:"/\\|?*]/g,'_');
+            const filename = `小红书下载/${folderName}/${cleanTitle}.mp4`;
+            
+            chrome.downloads.download({
+              url: note.url,
+              filename: filename,
+              conflictAction: 'uniquify'
             });
             
-            append(`下载请求响应: ${downloadRequest ? 'success' : 'failed'} - ${JSON.stringify(downloadRequest)}`);
-            
-            if (downloadRequest && downloadRequest.ok) {
-              downloadedCount++;
-              stats.downloadedNotes++;
-              await markNoteDownloaded(uid, note.id);
-              
-              // 验证下载记录是否保存成功
-              const verifyDownloaded = await isNoteDownloaded(uid, note.id);
-              append(`下载记录保存验证: ${verifyDownloaded ? '成功' : '失败'}`);
-              
-              // 添加到视频级别记录
-              if (note.title) titleMap[note.id] = note.title;
-              completedSet.add(note.id);
-              
-              append(`下载完成: ${note.title} (${note.id})`);
-            } else {
-              // 备用方案：直接获取视频URL
-              append(`主要下载方案失败，尝试备用方案获取视频URL: ${note.id}`);
-              
-              const videoResponse = await sendMessageSafely({
-                type: 'fetch-video-url',
-                noteId: note.id
-              });
-              
-              append(`备用方案响应: ${videoResponse ? 'success' : 'failed'} - ${JSON.stringify(videoResponse)}`);
-              
-              if (videoResponse && videoResponse.url) {
-                downloadedCount++;
-                stats.downloadedNotes++;
-                await markNoteDownloaded(uid, note.id);
-                
-                // 验证下载记录是否保存成功
-                const verifyDownloaded = await isNoteDownloaded(uid, note.id);
-                append(`备用下载记录保存验证: ${verifyDownloaded ? '成功' : '失败'}`);
-                
-                // 添加到视频级别记录
-                if (note.title) titleMap[note.id] = note.title;
-                completedSet.add(note.id);
-                
-                append(`下载完成: ${note.title} (${note.id})`);
-                
-                // 使用用户文件夹下载（备用方案）
-                const userRecord = userRecords.get(uid);
-                const folderName = userRecord?.username || uid;
-                const cleanTitle = (note.title || note.id).replace(/[<>:"/\\|?*]/g,'_');
-                const filename = `小红书下载/${folderName}/${cleanTitle}.mp4`;
-                
-                chrome.downloads.download({
-                  url: videoResponse.url,
-                  filename: filename,
-                  conflictAction: 'uniquify'
-                });
-              } else {
-                failedCount++;
-                stats.failedNotes++;
-                
-                // 添加到视频级别记录（失败的归入跳过）
-                if (note.title) titleMap[note.id] = note.title;
-                skippedSet.add(note.id);
-                
-                append(`获取下载链接失败: ${note.title} (${note.id})`);
-              }
-            }
+            append(`下载: ${note.title || note.id}`);
           } catch (downloadError) {
             failedCount++;
             stats.failedNotes++;
@@ -484,8 +427,18 @@ async function processUser(uid) {
             if (note.title) titleMap[note.id] = note.title;
             skippedSet.add(note.id);
             
-            append(`下载失败: ${note.title} (${note.id}) - ${downloadError.message}`);
+            append(`下载失败: ${note.title || note.id} - ${downloadError.message}`);
           }
+        } else {
+          // 没有URL的视频归入失败
+          failedCount++;
+          stats.failedNotes++;
+          
+          // 添加到视频级别记录（失败的归入跳过）
+          if (note.title) titleMap[note.id] = note.title;
+          skippedSet.add(note.id);
+          
+          append(`无视频链接: ${note.title || note.id}`);
         }
       } catch (error) {
         failedCount++;
@@ -509,7 +462,7 @@ async function processUser(uid) {
 
       
       // 短暂延迟避免请求过于频繁
-      await sleep(1000);
+      await sleep(500);
     }
     
     // 标记用户完成

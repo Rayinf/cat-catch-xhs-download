@@ -289,7 +289,7 @@ async function clickPlayAndDownload(anchor, keyword){
 }
 
 async function collectVideoItemsByClick(maxCount, keyword, offset=0){
-  safeSend({type:'progress',text:`开始抓取关键词 [${keyword}] ...`});
+  // 静默收集，不输出进度信息
   await new Promise(r=>setTimeout(r,600));
 
   const items=[];
@@ -308,12 +308,8 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
       let noteId;
       try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=href;}
       const noteTitle=getNoteTitleFromAnchor(a);
-      // 新增：已下载检测(跳过日志仅输出一次)
+      // 新增：已下载检测(静默跳过)
       if(currentKeywordSet.has(noteId)) {
-        if(!loggedSkipped.has(noteId)){
-          loggedSkipped.add(noteId);
-          safeSend({type:'progress',text:`已下载过 ${noteId} 跳过`,noteId,title:noteTitle,skipped:true});
-        }
         continue;
       }
       if(processed.has(noteId)) continue;
@@ -325,10 +321,9 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
         // 新增：记录已下载
         markDownloaded(noteId);
         if(skipRemain>0){
-          skipRemain--;safeSend({type:'progress',text:`已跳过 ${noteId}`});
+          skipRemain--;
         } else {
-          items.push({noteId,url:stream});
-          safeSend({type:'progress',text:`已完成 ${items.length}/${maxCount} : ${noteId}`,noteId,title:noteTitle,download:true});
+          items.push({noteId,url:stream,title:noteTitle});
         }
       }
       break;
@@ -343,7 +338,6 @@ async function collectVideoItemsByClick(maxCount, keyword, offset=0){
     }
   }
 
-  safeSend({type:'progress',text:`下载完成 共 ${items.length} 个`});
   return items;
 }
 
