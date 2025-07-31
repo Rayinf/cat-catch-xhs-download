@@ -398,37 +398,46 @@ async function processUser(uid) {
           
           append(`跳过已下载: ${note.title || note.id}`);
         } else if (note.url) {
-          // 直接使用收集到的视频流URL下载（和progress.html一样）
+          // 先尝试无水印下载（background.js -> getVideoUrlDirectly）
           try {
-            downloadedCount++;
-            stats.downloadedNotes++;
-            await markNoteDownloaded(uid, note.id);
-            
-            // 添加到视频级别记录
-            if (note.title) titleMap[note.id] = note.title;
-            completedSet.add(note.id);
-            
-            // 按用户名创建文件夹下载
             const userRecord = userRecords.get(uid);
             const folderName = userRecord?.username || uid;
-            const cleanTitle = (note.title || note.id).replace(/[<>:"/\\|?*]/g,'_');
-            const filename = `小红书下载/${folderName}/${cleanTitle}.mp4`;
-            
-            chrome.downloads.download({
-              url: note.url,
-              filename: filename,
-              conflictAction: 'uniquify'
+            const bgResp = await sendMessageSafely({
+              type: 'xhs-download-single',
+              noteId: note.id,
+              title: note.title,
+              uid: uid,
+              username: folderName
             });
-            
-            append(`下载: ${note.title || note.id}`);
+            if (bgResp && bgResp.ok) {
+              // background 已完成下载（无水印）
+              downloadedCount++;
+              stats.downloadedNotes++;
+              await markNoteDownloaded(uid, note.id);
+              if (note.title) titleMap[note.id] = note.title;
+              completedSet.add(note.id);
+              append(`无水印下载: ${note.title || note.id}`);
+            } else {
+              // 背景下载失败，退回水印 stream 链接
+              const cleanTitle = (note.title || note.id).replace(/[<>:"/\\|?*]/g,'_');
+              const filename = `小红书下载/${folderName}/${cleanTitle}.mp4`;
+              chrome.downloads.download({
+                url: note.url,
+                filename: filename,
+                conflictAction: 'uniquify'
+              });
+              downloadedCount++;
+              stats.downloadedNotes++;
+              await markNoteDownloaded(uid, note.id);
+              if (note.title) titleMap[note.id] = note.title;
+              completedSet.add(note.id);
+              append(`(带水印)下载: ${note.title || note.id}`);
+            }
           } catch (downloadError) {
             failedCount++;
             stats.failedNotes++;
-            
-            // 添加到视频级别记录（失败的归入跳过）
             if (note.title) titleMap[note.id] = note.title;
             skippedSet.add(note.id);
-            
             append(`下载失败: ${note.title || note.id} - ${downloadError.message}`);
           }
         } else {
