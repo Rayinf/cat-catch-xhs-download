@@ -283,7 +283,7 @@ async function processUser(uid) {
     // 直接打开用户页面 - 类似progress.html的方式
     userTab = await openUserPageAndProcess(uid);
     
-    // 初始化用户记录
+    // 初始化用户记录（先用UID，后续会更新为真实用户名）
     const userInfo = {
       uid: uid,
       username: uid, // 先用UID作为用户名
@@ -301,6 +301,26 @@ async function processUser(uid) {
     });
     
     append(`用户页面已打开，开始收集笔记信息...`);
+    
+    // 获取真实用户名
+    try {
+      const userInfoResp = await sendMessageSafely({
+        type: 'getUserInfo',
+        uid: uid
+      }, userTab.id);
+      
+      if (userInfoResp && userInfoResp.username && userInfoResp.username !== uid) {
+        // 更新用户记录中的用户名
+        const currentRecord = userRecords.get(uid);
+        userRecords.set(uid, {
+          ...currentRecord,
+          username: userInfoResp.username
+        });
+        if(DEBUG) append(`获取到用户名: ${userInfoResp.username}`);
+      }
+    } catch (userInfoError) {
+      if(DEBUG) append(`获取用户名失败: ${userInfoError.message}`);
+    }
     
     // 获取用户设置的下载数量
     const downloadCount = parseInt(document.getElementById('download-count').value) || 20;
@@ -669,8 +689,19 @@ async function clearDownloadRecords() {
       stats.skippedNotes = 0;
       stats.failedNotes = 0;
       
+      // 停止当前下载
+      isRunning = false;
+      currentUserIndex = 0;
+      currentUsers = [];
+      
       // 更新界面
       renderLists();
+      
+      // 清空日志
+      const logEl = document.getElementById('log-content');
+      if (logEl) {
+        logEl.innerHTML = '';
+      }
       
     } else {
       append('没有找到需要清除的下载记录');
