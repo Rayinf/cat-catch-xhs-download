@@ -50,6 +50,8 @@ function initializeUI() {
   document.getElementById('uid-file').addEventListener('change', handleFileSelect);
   document.getElementById('btn-download-selected').addEventListener('click', downloadSelectedSkipped);
   document.getElementById('btn-clear-records').addEventListener('click', clearDownloadRecords);
+  document.getElementById('btn-view-records').addEventListener('click', showDownloadRecords);
+  document.getElementById('btn-close-records').addEventListener('click', hideDownloadRecords);
 }
 
 // 解析UID输入，支持多种格式
@@ -646,6 +648,16 @@ async function clearDownloadRecords() {
       Object.keys(titleMap).forEach(key => delete titleMap[key]);
       userRecords.clear();
       
+      // 清除content.js中的下载记录
+      try {
+        await sendMessageSafely({
+          type: 'clear-all-downloaded-keywords'
+        });
+        append('已清除页面中的下载记录');
+      } catch (error) {
+        append(`清除页面记录失败: ${error.message}`);
+      }
+      
       // 重置统计
       stats.totalUsers = 0;
       stats.completedUsers = 0;
@@ -664,6 +676,101 @@ async function clearDownloadRecords() {
     append(`清除下载记录失败: ${error.message}`);
   }
 }
+
+// 显示下载记录模态框
+async function showDownloadRecords() {
+  const modal = document.getElementById('records-modal');
+  const content = document.getElementById('records-content');
+  
+  modal.style.display = 'block';
+  content.innerHTML = '<p style="text-align:center;color:#666;padding:40px;">加载中...</p>';
+  
+  try {
+    // 获取所有存储的key
+    const allKeys = await new Promise((resolve) => {
+      chrome.storage.local.get(null, (result) => {
+        resolve(Object.keys(result));
+      });
+    });
+    
+    // 找出所有下载记录的key（格式为 downloaded_uid）
+    const downloadKeys = allKeys.filter(key => key.startsWith('downloaded_'));
+    
+    if (downloadKeys.length === 0) {
+      content.innerHTML = '<p style="text-align:center;color:#666;padding:40px;">暂无下载记录</p>';
+      return;
+    }
+    
+    // 获取所有下载记录
+    const records = await new Promise((resolve) => {
+      chrome.storage.local.get(downloadKeys, (result) => {
+        resolve(result);
+      });
+    });
+    
+    // 构建HTML
+    let html = '<div style="max-height:60vh;overflow:auto;">';
+    
+    for (const [key, noteIds] of Object.entries(records)) {
+      const uid = key.replace('downloaded_', '');
+      html += `
+        <div style="margin-bottom:20px;border:1px solid #e9ecef;border-radius:6px;padding:15px;">
+          <h3 style="margin:0 0 10px 0;color:#ff2c55;font-size:16px;">用户: ${uid}</h3>
+          <p style="margin:0 0 10px 0;color:#666;font-size:14px;">已下载 ${noteIds.length} 个笔记</p>
+          <div style="max-height:200px;overflow:auto;">
+      `;
+      
+      noteIds.forEach((noteId, index) => {
+        const title = titleMap[noteId] || noteId;
+        html += `
+          <div style="padding:5px 0;border-bottom:1px solid #f5f5f5;display:flex;align-items:center;">
+            <span style="color:#666;margin-right:10px;font-size:12px;">${index + 1}.</span>
+            <span style="flex:1;color:#333;">${title}</span>
+            <span style="color:#999;font-size:12px;">${noteId}</span>
+          </div>
+        `;
+      });
+      
+      html += '</div></div>';
+    }
+    
+    html += '</div>';
+    
+    // 添加统计信息
+    const totalNotes = Object.values(records).reduce((sum, noteIds) => sum + noteIds.length, 0);
+    html = `
+      <div style="background:#f8f9fa;padding:15px;border-radius:6px;margin-bottom:20px;">
+        <h3 style="margin:0;color:#333;">下载记录统计</h3>
+        <p style="margin:10px 0 0 0;color:#666;">
+          共记录了 <strong>${downloadKeys.length}</strong> 个用户的下载记录，
+          总计 <strong>${totalNotes}</strong> 个已下载笔记
+        </p>
+      </div>
+    ` + html;
+    
+    content.innerHTML = html;
+    
+  } catch (error) {
+    content.innerHTML = `<p style="text-align:center;color:#dc3545;padding:40px;">加载失败: ${error.message}</p>`;
+  }
+}
+
+// 隐藏下载记录模态框
+function hideDownloadRecords() {
+  document.getElementById('records-modal').style.display = 'none';
+}
+
+// 添加模态框背景点击关闭功能
+document.addEventListener('DOMContentLoaded', function() {
+  const modal = document.getElementById('records-modal');
+  if (modal) {
+    modal.addEventListener('click', function(e) {
+      if (e.target === modal) {
+        hideDownloadRecords();
+      }
+    });
+  }
+});
 
 // 工具函数：延迟
 function sleep(ms) {

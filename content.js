@@ -500,6 +500,15 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   
+  // 清除所有关键词的已下载记录
+  if(msg.type==='clear-all-downloaded-keywords'){
+    downloadedByKeyword = {};
+    currentKeywordSet.clear();
+    chrome.storage.local.set({ [DOWNLOADED_BY_KEYWORD_KEY]: downloadedByKeyword });
+    sendResponse({ok:true});
+    return true;
+  }
+  
   // === 用户主页批量下载相关功能 ===
   // 获取用户信息
   if(msg.type === 'getUserInfo'){

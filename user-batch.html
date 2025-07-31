@@ -99,6 +99,7 @@
           <div class="form-control-group">
             <button id="btn-start" class="btn">开始批量下载</button>
             <button id="btn-clear-records" class="btn btn-secondary">清除下载记录</button>
+            <button id="btn-view-records" class="btn btn-secondary">查看下载记录</button>
           </div>
         </div>
 
@@ -138,6 +139,19 @@
           <h3>运行日志</h3>
           <div class="log-area" id="log"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 下载记录模态框 -->
+  <div id="records-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;">
+    <div style="position:relative;margin:5% auto;width:80%;max-width:800px;background:white;border-radius:8px;padding:20px;max-height:80vh;overflow:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:1px solid #eee;padding-bottom:15px;">
+        <h2 style="margin:0;color:#333;">下载记录详情</h2>
+        <button id="btn-close-records" style="background:none;border:none;font-size:24px;cursor:pointer;color:#666;padding:0;width:30px;height:30px;display:flex;align-items:center;justify-content:center;">&times;</button>
+      </div>
+      <div id="records-content">
+        <p style="text-align:center;color:#666;padding:40px;">加载中...</p>
       </div>
     </div>
   </div>
