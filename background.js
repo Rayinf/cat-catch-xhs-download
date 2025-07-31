@@ -146,6 +146,28 @@ function safeDownload(url){
   }
 }
 
+// 用户批量下载专用的下载函数，按用户名创建文件夹
+function safeDownloadWithFolder(url, title, folderName){
+  let name = title || url.split('/').pop().split('?')[0].split('#')[0] || `video_${Date.now()}.mp4`;
+  // 确保文件名有扩展名
+  if (!name.includes('.')) {
+    name += '.mp4';
+  }
+  // windows 禁止字符
+  name = name.replace(/[<>:"/\\|?*]/g,'_');
+  folderName = folderName.replace(/[<>:"/\\|?*]/g,'_');
+  
+  try{
+    // 按用户名创建文件夹，类似progress.html的逻辑
+    const folder = `小红书下载/${folderName}/`;
+    chrome.downloads.download({url, filename: folder + name, conflictAction: 'uniquify'});
+    console.log(`开始下载到文件夹 ${folder}: ${name}`);
+  }catch(e){
+    console.warn('downloads.download failed',e);
+    try{chrome.downloads.download({url, conflictAction:'uniquify'});}catch{}
+  }
+}
+
 // 注册webRequest监听器
 try {
   chrome.webRequest.onCompleted.removeListener && chrome.webRequest.onCompleted.removeListener(() => {}); // 清理旧监听器
@@ -221,4 +243,109 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     })();
     return true; // 异步
   }
-}); 
+  
+  // 单个笔记下载（用户批量下载专用）
+  if(msg.type==='xhs-download-single'){
+    const { noteId, title, uid, username } = msg;
+    if(!noteId){
+      sendResponse({ok:false,error:'noteId缺失'});
+      return true;
+    }
+    (async ()=>{
+      try{
+        // 直接获取视频URL而不需要打开搜索页面
+        const videoUrl = await getVideoUrlDirectly(noteId);
+        if(videoUrl){
+          // 使用用户名作为文件夹名称，类似progress.html的逻辑
+          const folderName = username || uid;
+          safeDownloadWithFolder(videoUrl, title || noteId, folderName);
+          sendResponse({ok:true,url:videoUrl});
+        } else {
+          sendResponse({ok:false,error:'无法获取下载链接'});
+        }
+      }catch(e){
+        sendResponse({ok:false,error:e.message});
+      }
+    })();
+    return true; // 异步
+  }
+  
+  // 直接获取视频URL
+  if(msg.type==='fetch-video-url'){
+    const { noteId } = msg;
+    if(!noteId){
+      sendResponse({ok:false,error:'noteId缺失'});
+      return true;
+    }
+    (async ()=>{
+      try{
+        const videoUrl = await getVideoUrlDirectly(noteId);
+        sendResponse({ok:!!videoUrl,url:videoUrl});
+      }catch(e){
+        sendResponse({ok:false,error:e.message});
+      }
+    })();
+    return true; // 异步
+  }
+});
+
+/**
+ * 直接获取视频URL，不需要打开搜索页面
+ */
+async function getVideoUrlDirectly(noteId) {
+  try {
+    // 尝试从已经打开的小红书标签页获取
+    const tabs = await chrome.tabs.query({url: '*://*.xiaohongshu.com/*'});
+    
+    for (const tab of tabs) {
+      try {
+        // 确保content script已注入
+        await chrome.scripting.executeScript({
+          target: {tabId: tab.id},
+          files: ['content.js']
+        });
+        
+        // 尝试获取视频URL
+        const response = await sendMessagePromise(tab.id, {
+          type: 'fetch-video-url',
+          noteId: noteId
+        });
+        
+        if (response && response.url) {
+          return response.url;
+        }
+      } catch (error) {
+        console.log(`标签页 ${tab.id} 获取失败:`, error);
+        continue;
+      }
+    }
+    
+    // 如果所有标签页都失败，打开笔记详情页
+    const noteUrl = `https://www.xiaohongshu.com/explore/${noteId}`;
+    const tab = await chrome.tabs.create({ url: noteUrl, active: false });
+    
+    // 等待页面加载
+    await waitTabComplete(tab.id);
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // 注入content script
+    await chrome.scripting.executeScript({
+      target: {tabId: tab.id},
+      files: ['content.js']
+    });
+    
+    // 获取视频URL
+    const response = await sendMessagePromise(tab.id, {
+      type: 'get-video-url'
+    });
+    
+    // 关闭标签页
+    chrome.tabs.remove(tab.id);
+    
+    return response?.url || null;
+    
+  } catch (error) {
+    console.error('直接获取视频URL失败:', error);
+    return null;
+  }
+} 

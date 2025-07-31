@@ -1,0 +1,745 @@
+/*
+ * user-batch.js - 用户主页批量下载功能
+ */
+
+// 日志函数 - 复用progress.js的风格
+function append(text) {
+  const el = document.getElementById('log');
+  el.textContent += text + '\n';
+  el.scrollTop = el.scrollHeight;
+}
+
+// 下载管理
+const userRecords = new Map(); // UID -> user info (保留用于文件夹名称)
+
+// 视频级别的下载记录管理（模仿progress.js）
+const completedSet = new Set();
+const skippedSet = new Set();
+const titleMap = {};
+let listCompletedEl;
+let listSkippedEl;
+
+// 统计数据
+let stats = {
+  totalUsers: 0,
+  completedUsers: 0,
+  totalNotes: 0,
+  downloadedNotes: 0,
+  skippedNotes: 0,
+  failedNotes: 0
+};
+
+// 控制状态
+let isRunning = false;
+let currentUserIndex = 0;
+let currentUsers = [];
+
+// 初始化
+document.addEventListener('DOMContentLoaded', () => {
+  initializeUI();
+  renderLists();
+});
+
+function initializeUI() {
+  // 初始化DOM元素引用
+  listCompletedEl = document.getElementById('list-completed');
+  listSkippedEl = document.getElementById('list-skipped');
+  
+  // 绑定事件处理器
+  document.getElementById('btn-start').addEventListener('click', startBatchDownload);
+  document.getElementById('uid-file').addEventListener('change', handleFileSelect);
+  document.getElementById('btn-download-selected').addEventListener('click', downloadSelectedSkipped);
+  document.getElementById('btn-clear-records').addEventListener('click', clearDownloadRecords);
+}
+
+// 解析UID输入，支持多种格式
+function parseUIDs(input) {
+  const lines = input.split('\n').map(line => line.trim()).filter(line => line);
+  const uids = [];
+  
+  for (const line of lines) {
+    // 检查是否是完整的用户主页链接
+    const urlMatch = line.match(/https?:\/\/www\.xiaohongshu\.com\/user\/profile\/([a-fA-F0-9]+)/);
+    if (urlMatch) {
+      uids.push(urlMatch[1]);
+      continue;
+    }
+    
+    // 检查是否是纯UID (24位十六进制字符)
+    if (/^[a-fA-F0-9]{24}$/.test(line)) {
+      uids.push(line);
+      continue;
+    }
+    
+    append(`警告: 无法识别的UID格式: ${line}`);
+  }
+  
+  return [...new Set(uids)]; // 去重
+}
+
+// 文件导入处理
+async function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  
+  try {
+    const content = await readFileAsText(file);
+    const currentContent = document.getElementById('uid-input').value;
+    const newContent = currentContent ? currentContent + '\n' + content : content;
+    document.getElementById('uid-input').value = newContent;
+    append(`成功导入文件: ${file.name}`);
+  } catch (error) {
+    append(`文件导入失败: ${error.message}`);
+  }
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('文件读取失败'));
+    reader.readAsText(file);
+  });
+}
+
+// 确保background script处于活跃状态 - 复用progress.js逻辑
+function wakeUpBackground() {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    function tryPing() {
+      attempts++;
+      console.log(`Ping attempt ${attempts}/${maxAttempts}`);
+      
+      chrome.runtime.sendMessage({type: 'ping'}, (response) => {
+        if (chrome.runtime.lastError) {
+          console.log('Background script not responding, retrying...');
+          if (attempts >= maxAttempts) {
+            reject(new Error('Background script failed to respond after multiple attempts'));
+          } else {
+            setTimeout(tryPing, 500);
+          }
+        } else {
+          console.log('Background script responded:', response);
+          resolve();
+        }
+      });
+    }
+    
+    tryPing();
+  });
+}
+
+// 发送消息的安全包装函数
+function sendMessageSafely(message, retries = 3) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    
+    function tryMessage() {
+      attempts++;
+      append(`发送消息尝试 ${attempts}/${retries + 1}: ${message.type}`);
+      
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          const error = chrome.runtime.lastError.message;
+          append(`消息发送失败 (尝试 ${attempts}): ${error}`);
+          
+          if (attempts <= retries) {
+            setTimeout(tryMessage, 1000 * attempts); // 递增延迟
+          } else {
+            reject(new Error(`消息发送失败，已重试 ${retries} 次: ${error}`));
+          }
+        } else {
+          append(`消息发送成功 (尝试 ${attempts}): ${response ? 'ok' : 'failed'}`);
+          resolve(response);
+        }
+      });
+    }
+    
+    tryMessage();
+  });
+}
+
+// 检查background script是否准备就绪
+async function ensureBackgroundReady() {
+  try {
+    await wakeUpBackground();
+    append('Background script已就绪');
+    return true;
+  } catch (error) {
+    append(`Background script连接失败: ${error.message}`);
+    return false;
+  }
+}
+
+// 直接打开用户页面进行处理 - 类似progress.html的方式
+async function openUserPageAndProcess(uid) {
+  const userProfileUrl = `https://www.xiaohongshu.com/user/profile/${uid}`;
+  
+  append(`正在打开用户页面: ${userProfileUrl}`);
+  
+  // 后台打开用户页面
+  const tab = await chrome.tabs.create({
+    url: userProfileUrl,
+    active: false // 后台打开
+  });
+  
+  // 等待页面加载完成
+  await sleep(8000); // 给更多时间加载用户页面
+  
+  return tab;
+}
+
+// 开始批量下载
+async function startBatchDownload() {
+  if (isRunning) return;
+  
+  const input = document.getElementById('uid-input').value.trim();
+  if (!input) {
+    append('请输入至少一个用户UID');
+    return;
+  }
+  
+  currentUsers = parseUIDs(input);
+  if (currentUsers.length === 0) {
+    append('没有找到有效的UID');
+    return;
+  }
+  
+  isRunning = true;
+  currentUserIndex = 0;
+  
+  // 重置统计
+  completedSet.clear();
+  skippedSet.clear();
+  Object.keys(titleMap).forEach(key => delete titleMap[key]);
+  userRecords.clear();
+  
+  stats = {
+    totalUsers: currentUsers.length,
+    completedUsers: 0,
+    totalNotes: 0,
+    downloadedNotes: 0,
+    skippedNotes: 0,
+    failedNotes: 0
+  };
+  
+  renderLists();
+  
+  append(`开始批量下载 ${currentUsers.length} 个用户的内容`);
+  
+  try {
+    append('正在连接background script...');
+    
+    // 确保background script准备就绪
+    const backgroundReady = await ensureBackgroundReady();
+    if (!backgroundReady) {
+      throw new Error('Background script未就绪，请重新加载扩展');
+    }
+    
+    append('连接成功，开始处理用户...');
+    
+    await processUsers();
+  } catch (error) {
+    append(`批量下载出错: ${error.message}`);
+  } finally {
+    isRunning = false;
+  }
+}
+
+// 处理所有用户
+async function processUsers() {
+  for (let i = currentUserIndex; i < currentUsers.length; i++) {
+    if (!isRunning) break;
+    
+    while (isPaused) {
+      await sleep(1000);
+    }
+    
+    currentUserIndex = i;
+    const uid = currentUsers[i];
+    
+    try {
+      await processUser(uid);
+      completedUsers.add(uid);
+      stats.completedUsers++;
+    } catch (error) {
+      append(`用户 ${uid} 处理失败: ${error.message}`);
+      stats.failedNotes++;
+    }
+    
+    updateStats();
+    renderLists();
+  }
+  
+  append('批量下载完成');
+}
+
+// 处理单个用户
+async function processUser(uid) {
+  append(`开始处理用户: ${uid}`);
+  let userTab = null;
+  
+  try {
+    // 直接打开用户页面 - 类似progress.html的方式
+    userTab = await openUserPageAndProcess(uid);
+    
+    // 初始化用户记录
+    const userInfo = {
+      uid: uid,
+      username: uid, // 先用UID作为用户名
+      profileUrl: `https://www.xiaohongshu.com/user/profile/${uid}`
+    };
+    
+    userRecords.set(uid, {
+      ...userInfo,
+      status: 'downloading',
+      progress: 0,
+      downloaded: 0,
+      skipped: 0,
+      failed: 0,
+      lastUpdate: new Date().toLocaleString()
+    });
+    
+    append(`用户页面已打开，开始收集笔记信息...`);
+    
+    // 获取用户设置的下载数量
+    const downloadCount = parseInt(document.getElementById('download-count').value) || 20;
+    
+    // 在用户页面上收集笔记信息 - 使用与progress.html相同的方式
+    const notes = await new Promise((resolve, reject) => {
+      // 给页面更多时间渲染
+      setTimeout(() => {
+        chrome.tabs.sendMessage(userTab.id, {
+          type: 'collect-video-items',
+          keyword: `user_${uid}`, // 使用用户ID作为关键词
+          maxCount: downloadCount, // 使用用户设置的数量
+          offset: 0
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            append(`页面通信失败: ${chrome.runtime.lastError.message}`);
+            resolve([]);
+          } else if (response && response.items) {
+            const noteList = response.items.map(item => ({
+              id: item.noteId,
+              title: item.title || item.noteId,
+              type: 'user_note',
+              url: item.url
+            }));
+            resolve(noteList);
+          } else {
+            append('未能获取笔记列表，尝试备用方法...');
+            // 备用方法：直接收集note IDs
+            chrome.tabs.sendMessage(userTab.id, {
+              type: 'collect-note-ids',
+              targetCount: 200
+            }, (backupResponse) => {
+              if (backupResponse && backupResponse.ids) {
+                const noteList = backupResponse.ids.map(id => ({
+                  id: id,
+                  title: id,
+                  type: 'user_note'
+                }));
+                resolve(noteList);
+              } else {
+                resolve([]);
+              }
+            });
+          }
+        });
+      }, 5000); // 给更多时间让页面完全加载
+    });
+    
+    append(`用户 ${uid} 共找到 ${notes.length} 个笔记`);
+    
+    if (notes.length === 0) {
+      append(`用户 ${uid} 没有可下载的笔记，可能是私密账户`);
+      const userRecord = userRecords.get(uid);
+      userRecords.set(uid, {
+        ...userRecord,
+        status: 'completed',
+        progress: 100
+      });
+      return;
+    }
+    
+    stats.totalNotes += notes.length;
+    
+    // 更新用户记录中的总笔记数
+    let currentUserRecord = userRecords.get(uid);
+    userRecords.set(uid, {
+      ...currentUserRecord,
+      totalNotes: notes.length
+    });
+    
+    // 处理用户的所有笔记
+    let downloadedCount = 0;
+    let skippedCount = 0;
+    let failedCount = 0;
+    
+    // 使用progress.html相同的下载方式
+    append(`开始批量下载用户 ${uid} 的 ${notes.length} 个笔记...`);
+    
+    for (let j = 0; j < notes.length; j++) {
+      if (!isRunning) break;
+      
+
+      
+      const note = notes[j];
+      
+      try {
+        // 检查是否已下载
+        const alreadyDownloaded = await isNoteDownloaded(uid, note.id);
+        append(`检查笔记 ${note.id} 下载状态: ${alreadyDownloaded ? '已下载' : '未下载'}`);
+        
+        if (alreadyDownloaded) {
+          skippedCount++;
+          stats.skippedNotes++;
+          
+          // 添加到视频级别记录
+          if (note.title) titleMap[note.id] = note.title;
+          skippedSet.add(note.id);
+          
+          append(`跳过已下载笔记: ${note.title || note.id}`);
+        } else {
+          // 使用与progress.html完全相同的下载方式
+          try {
+            // 首先发送下载请求到background script
+            const userRecord = userRecords.get(uid);
+            append(`正在请求下载: ${note.title || note.id}`);
+            
+            const downloadRequest = await sendMessageSafely({
+              type: 'xhs-download-single',
+              noteId: note.id,
+              title: note.title,
+              uid: uid,
+              username: userRecord?.username || uid // 传递用户名用于创建文件夹
+            });
+            
+            append(`下载请求响应: ${downloadRequest ? 'success' : 'failed'} - ${JSON.stringify(downloadRequest)}`);
+            
+            if (downloadRequest && downloadRequest.ok) {
+              downloadedCount++;
+              stats.downloadedNotes++;
+              await markNoteDownloaded(uid, note.id);
+              
+              // 验证下载记录是否保存成功
+              const verifyDownloaded = await isNoteDownloaded(uid, note.id);
+              append(`下载记录保存验证: ${verifyDownloaded ? '成功' : '失败'}`);
+              
+              // 添加到视频级别记录
+              if (note.title) titleMap[note.id] = note.title;
+              completedSet.add(note.id);
+              
+              append(`下载完成: ${note.title} (${note.id})`);
+            } else {
+              // 备用方案：直接获取视频URL
+              append(`主要下载方案失败，尝试备用方案获取视频URL: ${note.id}`);
+              
+              const videoResponse = await sendMessageSafely({
+                type: 'fetch-video-url',
+                noteId: note.id
+              });
+              
+              append(`备用方案响应: ${videoResponse ? 'success' : 'failed'} - ${JSON.stringify(videoResponse)}`);
+              
+              if (videoResponse && videoResponse.url) {
+                downloadedCount++;
+                stats.downloadedNotes++;
+                await markNoteDownloaded(uid, note.id);
+                
+                // 验证下载记录是否保存成功
+                const verifyDownloaded = await isNoteDownloaded(uid, note.id);
+                append(`备用下载记录保存验证: ${verifyDownloaded ? '成功' : '失败'}`);
+                
+                // 添加到视频级别记录
+                if (note.title) titleMap[note.id] = note.title;
+                completedSet.add(note.id);
+                
+                append(`下载完成: ${note.title} (${note.id})`);
+                
+                // 使用用户文件夹下载（备用方案）
+                const userRecord = userRecords.get(uid);
+                const folderName = userRecord?.username || uid;
+                const cleanTitle = (note.title || note.id).replace(/[<>:"/\\|?*]/g,'_');
+                const filename = `小红书下载/${folderName}/${cleanTitle}.mp4`;
+                
+                chrome.downloads.download({
+                  url: videoResponse.url,
+                  filename: filename,
+                  conflictAction: 'uniquify'
+                });
+              } else {
+                failedCount++;
+                stats.failedNotes++;
+                
+                // 添加到视频级别记录（失败的归入跳过）
+                if (note.title) titleMap[note.id] = note.title;
+                skippedSet.add(note.id);
+                
+                append(`获取下载链接失败: ${note.title} (${note.id})`);
+              }
+            }
+          } catch (downloadError) {
+            failedCount++;
+            stats.failedNotes++;
+            
+            // 添加到视频级别记录（失败的归入跳过）
+            if (note.title) titleMap[note.id] = note.title;
+            skippedSet.add(note.id);
+            
+            append(`下载失败: ${note.title} (${note.id}) - ${downloadError.message}`);
+          }
+        }
+      } catch (error) {
+        failedCount++;
+        stats.failedNotes++;
+        append(`下载失败: ${note.id} - ${error.message}`);
+      }
+      
+      // 更新用户进度
+      const progress = Math.round(((j + 1) / notes.length) * 100);
+      const userRecord = userRecords.get(uid);
+      userRecords.set(uid, {
+        ...userRecord,
+        progress: progress,
+        downloaded: downloadedCount,
+        skipped: skippedCount,
+        failed: failedCount,
+        totalNotes: notes.length,
+        lastUpdate: new Date().toLocaleString()
+      });
+      
+
+      
+      // 短暂延迟避免请求过于频繁
+      await sleep(1000);
+    }
+    
+    // 标记用户完成
+    currentUserRecord = userRecords.get(uid);
+    userRecords.set(uid, {
+      ...currentUserRecord,
+      status: 'completed'
+    });
+    
+    append(`用户 ${uid} 处理完成: 下载${downloadedCount}, 跳过${skippedCount}, 失败${failedCount}`);
+    
+  } catch (error) {
+    append(`用户 ${uid} 处理出错: ${error.message}`);
+    currentUserRecord = userRecords.get(uid);
+    if (currentUserRecord) {
+      userRecords.set(uid, {
+        ...currentUserRecord,
+        status: 'failed'
+      });
+    }
+  } finally {
+    // 确保关闭用户标签页
+    if (userTab && userTab.id) {
+      try {
+        chrome.tabs.remove(userTab.id);
+        append(`已关闭用户 ${uid} 的标签页`);
+      } catch (closeError) {
+        append(`关闭标签页失败: ${closeError.message}`);
+      }
+    }
+  }
+}
+
+// 检查笔记是否已下载
+async function isNoteDownloaded(uid, noteId) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(`downloaded_${uid}`, (result) => {
+      const downloadedNotes = result[`downloaded_${uid}`] || [];
+      resolve(downloadedNotes.includes(noteId));
+    });
+  });
+}
+
+// 标记笔记已下载
+async function markNoteDownloaded(uid, noteId) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(`downloaded_${uid}`, (result) => {
+      const downloadedNotes = result[`downloaded_${uid}`] || [];
+      if (!downloadedNotes.includes(noteId)) {
+        downloadedNotes.push(noteId);
+        chrome.storage.local.set({[`downloaded_${uid}`]: downloadedNotes}, resolve);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+
+
+// 更新统计信息
+function updateStats() {
+  document.getElementById('stat-users').textContent = stats.totalUsers;
+  document.getElementById('stat-completed').textContent = stats.completedUsers;
+  document.getElementById('stat-downloaded').textContent = completedSet.size;
+  document.getElementById('stat-skipped').textContent = skippedSet.size;
+}
+
+// 渲染视频级别的下载记录（模仿progress.js）
+function renderVideoLists() {
+  if (!listCompletedEl || !listSkippedEl) return;
+  
+  const completedArr = [...completedSet];
+  const skippedArr = [...skippedSet];
+
+  listCompletedEl.innerHTML = completedArr.map(id => {
+    const title = titleMap[id] || id;
+    return `<div class="list-item"><a href="https://www.xiaohongshu.com/explore/${id}" target="_blank">${title}</a></div>`;
+  }).join('');
+  
+  listSkippedEl.innerHTML = skippedArr.map(id => {
+    const title = titleMap[id] || id;
+    return `<div class="list-item"><input type="checkbox" class="checkbox" data-id="${id}"/><a href="https://www.xiaohongshu.com/explore/${id}" target="_blank">${title}</a></div>`;
+  }).join('');
+}
+
+// 更新列表显示
+function renderLists() {
+  // 渲染视频级别记录
+  renderVideoLists();
+  
+  updateStats();
+}
+
+
+
+// 下载选中的跳过视频
+function downloadSelectedSkipped() {
+  if (!listSkippedEl) return;
+  
+  const checked = [...listSkippedEl.querySelectorAll('input[type="checkbox"]:checked')].map(el => el.dataset.id);
+  if (!checked.length) {
+    append('未选择任何跳过项');
+    return;
+  }
+  
+  append(`开始重新下载 ${checked.length} 个跳过的视频...`);
+  
+  // 重新下载这些视频
+  checked.forEach(async (noteId) => {
+    try {
+      // 从跳过列表移到下载中状态
+      skippedSet.delete(noteId);
+      
+      // 发送下载请求到background
+      const response = await sendMessageSafely({
+        type: 'xhs-download-single',
+        noteId: noteId,
+        title: titleMap[noteId] || noteId,
+        uid: 'retry', // 标记为重试下载
+        username: '重新下载'
+      });
+      
+      if (response && response.ok) {
+        completedSet.add(noteId);
+        append(`✅ 重新下载成功: ${titleMap[noteId] || noteId}`);
+      } else {
+        skippedSet.add(noteId); // 重新加回跳过列表
+        append(`❌ 重新下载失败: ${titleMap[noteId] || noteId}`);
+      }
+      
+      renderVideoLists();
+    } catch (error) {
+      skippedSet.add(noteId); // 重新加回跳过列表
+      append(`❌ 重新下载出错: ${titleMap[noteId] || noteId} - ${error.message}`);
+      renderVideoLists();
+    }
+  });
+}
+
+function getStatusText(status) {
+  const statusMap = {
+    'pending': '等待中',
+    'downloading': '下载中',
+    'completed': '已完成',
+    'failed': '失败'
+  };
+  return statusMap[status] || '未知';
+}
+
+
+
+// 清除下载记录
+async function clearDownloadRecords() {
+  if (!confirm('确定要清除所有下载记录吗？这将允许重新下载之前已下载的内容。')) {
+    return;
+  }
+  
+  try {
+    // 获取所有存储的key
+    const allKeys = await new Promise((resolve) => {
+      chrome.storage.local.get(null, (result) => {
+        resolve(Object.keys(result));
+      });
+    });
+    
+    // 找出所有下载记录的key（格式为 downloaded_uid）
+    const downloadKeys = allKeys.filter(key => key.startsWith('downloaded_'));
+    
+    if (downloadKeys.length > 0) {
+      // 删除所有下载记录
+      await new Promise((resolve) => {
+        chrome.storage.local.remove(downloadKeys, resolve);
+      });
+      
+      append(`已清除 ${downloadKeys.length} 个用户的下载记录`);
+      
+      // 清除内存中的记录
+      completedSet.clear();
+      skippedSet.clear();
+      Object.keys(titleMap).forEach(key => delete titleMap[key]);
+      userRecords.clear();
+      
+      // 重置统计
+      stats.totalUsers = 0;
+      stats.completedUsers = 0;
+      stats.totalNotes = 0;
+      stats.downloadedNotes = 0;
+      stats.skippedNotes = 0;
+      stats.failedNotes = 0;
+      
+      // 更新界面
+      renderLists();
+      
+    } else {
+      append('没有找到需要清除的下载记录');
+    }
+  } catch (error) {
+    append(`清除下载记录失败: ${error.message}`);
+  }
+}
+
+// 工具函数：延迟
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// 监听background script的进度消息（模仿progress.js）
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'progress') {
+    // 过滤跳过重复提示，减少日志冗余
+    if (!msg.skipped) append(msg.text);
+    
+    if (msg.noteId) {
+      if (msg.title) titleMap[msg.noteId] = msg.title;
+      
+      if (msg.skipped) {
+        if (!completedSet.has(msg.noteId)) skippedSet.add(msg.noteId);
+      } else if (msg.download || msg.forced) {
+        completedSet.add(msg.noteId);
+        skippedSet.delete(msg.noteId);
+      }
+      
+      renderVideoLists();
+    }
+  }
+});
+

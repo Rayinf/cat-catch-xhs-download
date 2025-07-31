@@ -505,6 +505,31 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ok:true});
     return true;
   }
+  
+  // === 用户主页批量下载相关功能 ===
+  // 获取用户信息
+  if(msg.type === 'getUserInfo'){
+    getUserInfo(msg.uid)
+      .then(data => sendResponse({success: true, data}))
+      .catch(error => sendResponse({success: false, error: error.message}));
+    return true;
+  }
+  
+  // 获取用户笔记列表
+  if(msg.type === 'getUserNotes'){
+    getUserNotes(msg.uid)
+      .then(data => sendResponse({success: true, data}))
+      .catch(error => sendResponse({success: false, error: error.message}));
+    return true;
+  }
+  
+  // 下载笔记
+  if(msg.type === 'downloadNote'){
+    downloadNoteFromUser(msg.uid, msg.note)
+      .then(data => sendResponse({success: true, data}))
+      .catch(error => sendResponse({success: false, error: error.message}));
+    return true;
+  }
 });
 
 // 下载捕获的无水印资源
@@ -513,6 +538,342 @@ chrome.runtime.onMessage.addListener((msg)=>{
     safeSend({type:'progress',text:`已捕获 ${msg.url.split('/').pop()}`});
   }
 });
+
+// === 用户主页批量下载功能实现 ===
+
+/**
+ * 获取用户信息
+ */
+async function getUserInfo(uid) {
+  try {
+    const userProfileUrl = `https://www.xiaohongshu.com/user/profile/${uid}`;
+    
+    // 如果当前不在用户页面，通过API获取或导航到用户页面
+    if (!window.location.href.includes(`/user/profile/${uid}`)) {
+      // 尝试通过API获取用户信息
+      try {
+        const apiResponse = await fetch('/api/sns/web/v1/user/otherinfo', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+          },
+          body: JSON.stringify({
+            target_user_id: uid
+          })
+        });
+        
+        if (apiResponse.ok) {
+          const data = await apiResponse.json();
+          if (data.success && data.data) {
+            return {
+              uid: uid,
+              username: data.data.basic_info?.nickname || uid,
+              profileUrl: userProfileUrl
+            };
+          }
+        }
+      } catch (apiError) {
+        console.log('API获取用户信息失败，尝试页面导航方式');
+      }
+      
+      // API失败时，返回基本信息，不进行页面导航（避免消息端口关闭）
+      return {
+        uid: uid,
+        username: uid, // 使用UID作为用户名
+        profileUrl: userProfileUrl
+      };
+    }
+    
+    // 如果已经在用户页面，尝试提取用户名
+    let username = uid; // 默认使用UID作为用户名
+    const userNameSelectors = [
+      '.user-name',
+      '.username',
+      '[class*="user-name"]',
+      '[class*="username"]',
+      '.user-info .name',
+      '.profile-info .name',
+      '[class*="nickname"]',
+      '[class*="display-name"]'
+    ];
+    
+    for (const selector of userNameSelectors) {
+      const element = document.querySelector(selector);
+      if (element && element.textContent.trim()) {
+        username = element.textContent.trim();
+        break;
+      }
+    }
+    
+    return {
+      uid: uid,
+      username: username,
+      profileUrl: userProfileUrl
+    };
+  } catch (error) {
+    // 即使出错也返回基本信息
+    return {
+      uid: uid,
+      username: uid,
+      profileUrl: `https://www.xiaohongshu.com/user/profile/${uid}`
+    };
+  }
+}
+
+/**
+ * 获取用户的所有笔记
+ */
+async function getUserNotes(uid) {
+  try {
+    // 优先使用API方式获取，避免页面导航
+    return await fetchUserNotesFromAPI(uid);
+  } catch (error) {
+    console.log('API获取失败，尝试其他方式:', error);
+    // API失败时返回空数组，而不是抛出错误
+    return [];
+  }
+}
+
+/**
+ * 从API获取用户笔记数据
+ */
+async function fetchUserNotesFromAPI(uid) {
+  const notes = [];
+  let cursor = '';
+  let hasMore = true;
+  let attempts = 0;
+  const maxAttempts = 3;
+  
+  while (hasMore && notes.length < 500 && attempts < maxAttempts) { // 限制数量和尝试次数
+    try {
+      attempts++;
+      
+      // 尝试多个API端点
+      const apiEndpoints = [
+        '/api/sns/web/v1/user_posted',
+        '/api/sns/web/v2/user_posted',
+        '/api/sns/web/v1/user/notes'
+      ];
+      
+      let response = null;
+      let data = null;
+      
+      for (const endpoint of apiEndpoints) {
+        try {
+          response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              user_id: uid,
+              target_user_id: uid,
+              cursor: cursor,
+              num: 20
+            })
+          });
+          
+          if (response.ok) {
+            data = await response.json();
+            if (data.success || data.code === 0) {
+              break;
+            }
+          }
+        } catch (apiError) {
+          console.log(`API端点 ${endpoint} 失败:`, apiError);
+          continue;
+        }
+      }
+      
+      if (!data || (!data.success && data.code !== 0)) {
+        throw new Error('所有API端点都失败了');
+      }
+      
+      const noteData = data.data?.notes || data.data?.feeds || [];
+      
+      if (noteData.length > 0) {
+        for (const note of noteData) {
+          const noteId = note.note_id || note.id;
+          const title = note.display_title || note.title || '无标题';
+          
+          if (noteId) {
+            notes.push({
+              id: noteId,
+              title: title,
+              type: note.type || 'normal',
+              imageUrls: note.image_list?.map(img => img.url_default || img.url) || [],
+              videoUrl: note.video?.consumer?.origin_video_key || note.video_url || null
+            });
+          }
+        }
+        
+        cursor = data.data?.cursor || '';
+        hasMore = data.data?.has_more || false;
+      } else {
+        hasMore = false;
+      }
+      
+      // 添加延迟避免请求过快
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+    } catch (error) {
+      console.warn(`API获取失败 (尝试 ${attempts}/${maxAttempts}):`, error);
+      
+      if (attempts >= maxAttempts) {
+        // 所有API尝试都失败了，尝试页面抓取
+        if (window.location.href.includes(`/user/profile/${uid}`)) {
+          return await collectUserNotesFromPage();
+        } else {
+          // 不在用户页面，返回空数组
+          return [];
+        }
+      }
+      
+      // 短暂延迟后重试
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  }
+  
+  return notes;
+}
+
+/**
+ * 从当前页面收集用户笔记
+ */
+async function collectUserNotesFromPage() {
+  const notes = [];
+  const maxScrollAttempts = 50; // 最大滚动次数
+  let scrollAttempts = 0;
+  let previousNoteCount = 0;
+  let stableCount = 0;
+  
+  while (scrollAttempts < maxScrollAttempts) {
+    // 收集当前页面的笔记链接
+    const noteLinks = document.querySelectorAll('a[href*="/explore/"]');
+    const currentNotes = new Set();
+    
+    noteLinks.forEach(link => {
+      const match = link.href.match(/\/explore\/([0-9a-fA-F]+)/);
+      if (match) {
+        const noteId = match[1];
+        if (!currentNotes.has(noteId)) {
+          currentNotes.add(noteId);
+          
+          // 尝试获取笔记标题
+          let title = '无标题';
+          const titleElement = link.querySelector('.title, [class*="title"]') || 
+                              link.closest('.note-item, [class*="note"]')?.querySelector('.title, [class*="title"]');
+          if (titleElement) {
+            title = titleElement.textContent.trim();
+          }
+          
+          notes.push({
+            id: noteId,
+            title: title,
+            type: 'unknown', // 页面抓取时类型未知
+            link: link.href
+          });
+        }
+      }
+    });
+    
+    // 检查是否有新内容加载
+    if (notes.length === previousNoteCount) {
+      stableCount++;
+      if (stableCount >= 3) {
+        // 连续3次没有新内容，可能已经到底了
+        break;
+      }
+    } else {
+      stableCount = 0;
+      previousNoteCount = notes.length;
+    }
+    
+    // 滚动到页面底部
+    window.scrollTo(0, document.body.scrollHeight);
+    
+    // 等待新内容加载
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    scrollAttempts++;
+  }
+  
+  // 去重
+  const uniqueNotes = [];
+  const seenIds = new Set();
+  
+  for (const note of notes) {
+    if (!seenIds.has(note.id)) {
+      seenIds.add(note.id);
+      uniqueNotes.push(note);
+    }
+  }
+  
+  return uniqueNotes;
+}
+
+/**
+ * 下载用户的单个笔记
+ */
+async function downloadNoteFromUser(uid, note) {
+  try {
+    // 获取笔记详细信息和下载链接
+    const noteUrl = await fetchVideoUrl(note.id);
+    
+    if (noteUrl) {
+      // 发送下载请求到background script
+      chrome.runtime.sendMessage({
+        type: 'resource-captured',
+        url: noteUrl,
+        filename: `${uid}_${note.id}_${note.title}`.replace(/[^\w\-_]/g, '_')
+      });
+      
+      return {
+        noteId: note.id,
+        title: note.title,
+        downloadUrl: noteUrl,
+        status: 'downloaded'
+      };
+    } else {
+      throw new Error('无法获取下载链接');
+    }
+  } catch (error) {
+    throw new Error(`下载笔记失败: ${error.message}`);
+  }
+}
+
+/**
+ * 等待元素出现
+ */
+function waitForElement(selector, timeout = 5000) {
+  return new Promise((resolve, reject) => {
+    const element = document.querySelector(selector);
+    if (element) {
+      resolve(element);
+      return;
+    }
+    
+    const observer = new MutationObserver((mutations) => {
+      const element = document.querySelector(selector);
+      if (element) {
+        observer.disconnect();
+        resolve(element);
+      }
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+    
+    setTimeout(() => {
+      observer.disconnect();
+      reject(new Error(`元素 ${selector} 未找到`));
+    }, timeout);
+  });
+}
 
 // --- END main logic ---
 } 
