@@ -311,9 +311,10 @@ async function processUser(uid) {
       setTimeout(() => {
         chrome.tabs.sendMessage(userTab.id, {
           type: 'collect-video-items',
-          keyword: `user_${uid}`, // 使用用户ID作为关键词
-          maxCount: downloadCount, // 使用用户设置的数量
-          offset: 0
+          keyword: `user_${uid}`,
+          maxCount: downloadCount,
+          offset: 0,
+          quiet: true
         }, (response) => {
           if (chrome.runtime.lastError) {
             append(`页面通信失败: ${chrome.runtime.lastError.message}`);
