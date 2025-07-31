@@ -253,16 +253,11 @@ async function processUsers() {
   for (let i = currentUserIndex; i < currentUsers.length; i++) {
     if (!isRunning) break;
     
-    while (isPaused) {
-      await sleep(1000);
-    }
-    
     currentUserIndex = i;
     const uid = currentUsers[i];
     
     try {
       await processUser(uid);
-      completedUsers.add(uid);
       stats.completedUsers++;
     } catch (error) {
       append(`用户 ${uid} 处理失败: ${error.message}`);
