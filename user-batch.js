@@ -271,7 +271,7 @@ async function processUsers() {
     renderLists();
   }
   
-  append('批量下载完成');
+  if(DEBUG) append('批量下载完成');
 }
 
 // 处理单个用户
@@ -484,7 +484,7 @@ async function processUser(uid) {
       status: 'completed'
     });
     
-    append(`用户 ${uid} 处理完成: 下载${downloadedCount}, 跳过${skippedCount}, 失败${failedCount}`);
+    if(DEBUG) append(`用户 ${uid} 处理完成: 下载${downloadedCount}, 跳过${skippedCount}, 失败${failedCount}`);
     
   } catch (error) {
     append(`用户 ${uid} 处理出错: ${error.message}`);
