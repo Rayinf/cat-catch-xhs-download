@@ -246,6 +246,13 @@ async function waitForStream(timeout=8000){
 }
 
 async function clickPlayAndDownload(anchor, keyword){
+  let noteId = null;
+  try {
+    const href = anchor.getAttribute('href');
+    noteId = new URL(href, location.origin).pathname.split('/').pop();
+  } catch {
+    noteId = anchor.getAttribute('href') || `${Date.now()}`;
+  }
   anchor.scrollIntoView({behavior:'smooth',block:'center'});
   await new Promise(r=>setTimeout(r,400));
   anchor.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
@@ -254,9 +261,6 @@ async function clickPlayAndDownload(anchor, keyword){
   try{url=await waitForStream(2500);}catch{}
 
   if(!url){
-    const href=anchor.getAttribute('href');
-    let noteId;
-    try{noteId=new URL(href,location.origin).pathname.split('/').pop();}catch{noteId=href;}
     url=await fetchVideoUrlFromAnchor(anchor,noteId);
   }
 
@@ -264,26 +268,16 @@ async function clickPlayAndDownload(anchor, keyword){
   if(closeBtn) closeBtn.click();
 
   if(url){
-    safeSend({type:'progress',text:`捕获到流 ${url.split('/').pop()}`});
-    // 首先尝试使用前台 fetch+blob 携带正确 Referer 下载，避免被禁止
-    try{
-      await downloadBlob(url, `${noteId||Date.now()}.mp4`);
-    }catch(err){
-      console.warn('blob download failed',err);
-      // fallback: 再次等待新的 /stream/ 流出现
-      try{
-        const stream2 = await waitForStream(5000);
-        if(stream2){
-          safeSend({type:'progress',text:`二次捕获 ${stream2.split('/').pop()}`});
-          try{await downloadBlob(stream2, `${noteId||Date.now()}_2.mp4`);}catch(e){
-            chrome.runtime.sendMessage({type:'resource-captured',url:stream2});
-          }
-          return stream2;
-        }
-      }catch{}
-      // 最终交由 background 下载
-      chrome.runtime.sendMessage({type:'resource-captured',url});
-    }
+    // 发送进度消息，包含 noteId 和标题，标记为 download=true 以便前端直接归入已完成
+    safeSend({
+      type:'progress',
+      text:`捕获到流 ${url.split('/').pop()}`,
+      noteId: noteId,
+      title: getNoteTitleFromAnchor(anchor),
+      download: true
+    });
+    // 交由 background 下载（使用已设置好的文件夹）
+    chrome.runtime.sendMessage({type:'resource-captured',url});
     return url;
   }
   return null;
