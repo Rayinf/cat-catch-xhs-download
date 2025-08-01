@@ -563,7 +563,7 @@ async function processUser(uid) {
       // 短暂延迟避免请求过于频繁
       await sleep(500);
     }*/
-    // === 智能下载逻辑：优先使用流捕获，备用API下载 ===
+    // === 智能下载逻辑：依赖流捕获，无 API 备用 ===
     for (let j = 0; j < notes.length && isRunning; j++) {
       const note = notes[j];
 
@@ -589,15 +589,10 @@ async function processUser(uid) {
             completedSet.add(note.id);
             append(`✅ 流捕获已完成: ${note.title || note.id}`);
           } else {
-            // 先尝试触发流捕获（模拟用户浏览行为）
-            // 给页面一些时间让用户自动浏览触发流捕获
+            // 触发流捕获等待
             append(`⏳ 等待流捕获: ${note.title || note.id}`);
-            
-            // 等待一段时间看是否会自动捕获
-            await sleep(2000);
-            
-            // 再次检查是否已通过流捕获
-            if (capturedVideos.has(note.id)) {
+            const captured = await waitForCaptured(note.id, 6000);
+            if (captured) {
               downloadedCount++;
               stats.downloadedNotes++;
               await markNoteDownloaded(uid, note.id);
@@ -1112,6 +1107,23 @@ async function clearUserRecord(uid) {
 // 隐藏所有用户模态框
 function hideAllUsersModal() {
   document.getElementById('all-users-modal').style.display = 'none';
+}
+
+// 等待指定 noteId 流捕获
+function waitForCaptured(noteId, timeout = 6000) {
+  if (capturedVideos.has(noteId)) return Promise.resolve(true);
+  return new Promise(resolve => {
+    const start = Date.now();
+    const timer = setInterval(() => {
+      if (capturedVideos.has(noteId)) {
+        clearInterval(timer);
+        resolve(true);
+      } else if (Date.now() - start > timeout) {
+        clearInterval(timer);
+        resolve(false);
+      }
+    }, 500);
+  });
 }
 
 // 工具函数：延迟
