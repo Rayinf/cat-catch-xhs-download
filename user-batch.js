@@ -605,32 +605,12 @@ async function processUser(uid) {
               completedSet.add(note.id);
               append(`✅ 流捕获成功: ${note.title || note.id}`);
             } else {
-              // 流捕获失败，尝试API下载作为备用方案
-              const userRecord = userRecords.get(uid);
-              const folderName = userRecord?.username || uid;
-              const bgResp = await sendMessageSafely({
-                type: 'xhs-download-single',
-                noteId: note.id,
-                title: note.title,
-                uid: uid,
-                username: folderName
-              });
-
-              if (bgResp && bgResp.ok) {
-                downloadedCount++;
-                stats.downloadedNotes++;
-                await markNoteDownloaded(uid, note.id);
-                if (note.title) titleMap[note.id] = note.title;
-                completedSet.add(note.id);
-
-                append(`✅ API下载完成: ${note.title || note.id}`);
-              } else {
-                failedCount++;
-                stats.failedNotes++;
-                if (note.title) titleMap[note.id] = note.title;
-                skippedSet.add(note.id);
-                append(`⚠️ 下载失败: ${note.title || note.id}`);
-              }
+              // 流捕获失败，标记为跳过
+              failedCount++;
+              stats.failedNotes++;
+              if (note.title) titleMap[note.id] = note.title;
+              skippedSet.add(note.id);
+              append(`⚠️ 未捕获流: ${note.title || note.id}`);
             }
           }
         }
