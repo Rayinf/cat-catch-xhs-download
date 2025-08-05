@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>用户主页批量下载</title>
+  <style>
+    body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;padding:20px;max-width:1200px;margin:0 auto;background:#fafafa;}
+    .container{background:white;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,0.1);overflow:hidden;}
+    .header{background:linear-gradient(135deg,#ff2c55,#ff6b8a);color:white;padding:20px;text-align:center;}
+    .header h1{margin:0;font-size:24px;font-weight:600;}
+    .header p{margin:8px 0 0;opacity:0.9;font-size:14px;}
+    .main-content{display:flex;gap:20px;}
+    .left-panel{flex:1;min-width:0;}
+    .right-panel{width:400px;flex-shrink:0;}
+    .section{padding:20px;border-bottom:1px solid #f0f0f0;}
+    .section:last-child{border-bottom:none;}
+    .right-panel .section{border-bottom:none;}
+    .form-row{display:flex;gap:12px;margin-bottom:16px;align-items:flex-start;}
+    .form-row label{min-width:80px;font-weight:500;color:#333;margin-top:8px;flex-shrink:0;}
+    .form-row input,.form-row select,.form-row textarea{flex:1;padding:10px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;line-height:1.4;}
+    .form-row textarea{min-height:120px;font-family:Monaco,Consolas,monospace;resize:vertical;background:#fafafa;}
+    .form-control-group{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+    .file-input{flex:1;padding:8px 12px;border:1px solid #ddd;border-radius:6px;font-size:14px;background:white;cursor:pointer;color:#666;}
+    .file-input:hover{border-color:#ff2c55;}
+    .file-input:focus{outline:none;border-color:#ff2c55;box-shadow:0 0 0 2px rgba(255,44,85,0.1);}
+    .file-input::file-selector-button{background:#f8f9fa;border:1px solid #ddd;border-radius:4px;padding:4px 8px;margin-right:8px;cursor:pointer;font-size:12px;color:#666;}
+    .file-input::file-selector-button:hover{background:#e9ecef;border-color:#ccc;}
+    .btn{background:#ff2c55;color:white;border:none;padding:10px 20px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:500;transition:all 0.2s;margin-right:8px;margin-bottom:8px;white-space:nowrap;}
+    .btn:hover{background:#e02349;transform:translateY(-1px);box-shadow:0 2px 8px rgba(255,44,85,0.3);}
+    .btn:disabled{background:#ccc;cursor:not-allowed;transform:none;box-shadow:none;}
+    .btn-secondary{background:#666;color:white;}
+    .btn-secondary:hover{background:#555;}
+    .btn-danger{background:#dc3545;}
+    .btn-danger:hover{background:#c82333;}
+    .list-container{max-height:220px;overflow:auto;background:white;border:1px solid #e9ecef;border-radius:6px;padding:0;}
+    .list-container:empty::before{content:'暂无内容';color:#999;font-style:italic;padding:20px;display:block;text-align:center;}
+    .list-item{padding:12px 16px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:12px;transition:background-color 0.2s;}
+    .list-item:hover{background-color:#f8f9fa;}
+    .list-item:last-child{border-bottom:none;}
+    .list-item a{color:#ff2c55;text-decoration:none;flex:1;font-weight:500;}
+    .list-item a:hover{text-decoration:underline;color:#e02349;}
+    .list-item .meta{font-size:12px;color:#666;margin-left:auto;}
+    .status{display:inline-block;padding:2px 6px;border-radius:4px;font-size:12px;color:white;}
+    .status.downloading{background:#28a745;}
+    .status.completed{background:#007bff;}
+    .status.pending{background:#ffc107;color:#333;}
+    .status.failed{background:#dc3545;}
+    .log-area{height:500px;overflow:auto;background:#f5f5f5;padding:12px;font-family:Monaco,Consolas,monospace;font-size:13px;line-height:1.4;white-space:pre-wrap;border-radius:6px;margin:0;}
+    .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:16px;margin-bottom:16px;}
+    .stat-item{text-align:center;padding:16px 12px;background:#f8f9fa;border-radius:8px;border:1px solid #e9ecef;transition:all 0.2s;}
+    .stat-item:hover{background:#f1f3f4;border-color:#dee2e6;}
+    .stat-number{font-size:24px;font-weight:700;color:#ff2c55;margin-bottom:4px;}
+    .stat-label{font-size:13px;color:#666;font-weight:500;}
+    .uid-info{background:#f8f9fa;padding:12px;border-radius:6px;margin-bottom:12px;}
+    .uid-info p{margin:4px 0;font-size:14px;}
+    .uid-info span{font-weight:600;color:#ff2c55;}
+    .downloads-table{width:100%;border-collapse:collapse;margin-top:16px;}
+    .downloads-table th,.downloads-table td{border:1px solid #dee2e6;padding:8px;text-align:left;font-size:13px;}
+    .downloads-table th{background-color:#f8f9fa;font-weight:600;}
+    .modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;}
+    .modal-content{background:white;border-radius:12px;width:90%;max-width:800px;max-height:80vh;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,0.2);}
+    .modal-header{background:linear-gradient(135deg,#ff2c55,#ff6b8a);color:white;padding:16px 20px;display:flex;justify-content:space-between;align-items:center;}
+    .modal-header h3{margin:0;font-size:18px;}
+    .btn-close{background:none;border:none;color:white;font-size:24px;cursor:pointer;padding:0;width:30px;height:30px;display:flex;align-items:center;justify-content:center;}
+    .btn-close:hover{background:rgba(255,255,255,0.2);border-radius:50%;}
+    .modal-body{padding:20px;max-height:60vh;overflow-y:auto;}
+    .user-record-item{margin-bottom:20px;padding:16px;border:1px solid #eee;border-radius:8px;}
+    .user-record-header{font-weight:600;color:#ff2c55;margin-bottom:8px;font-size:16px;}
+    .note-record{padding:8px 12px;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;}
+    .note-record:last-child{border-bottom:none;}
+    .note-title{flex:1;color:#333;}
+    .note-meta{font-size:12px;color:#666;}
+    .checkbox{margin-right:8px;}
+    .keyword-info{background:#f8f9fa;padding:12px;border-radius:6px;margin-bottom:12px;}
+    .keyword-info p{margin:4px 0;font-size:14px;}
+    .keyword-info span{font-weight:600;color:#ff2c55;}
+    .keyword-item{margin-bottom:16px;padding:12px;border:1px solid #eee;border-radius:8px;}
+    .keyword-item h4{margin:0 0 8px;color:#ff2c55;font-size:16px;}
+    .keyword-meta{color:#666;font-size:14px;margin-bottom:8px;}
+    .keyword-list{max-height:150px;overflow-y:auto;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🐱 用户主页批量下载</h1>
+      <p>根据用户UID列表批量下载用户主页的所有内容</p>
+    </div>
+    
+    <div class="main-content">
+      <div class="left-panel">
+        <div class="section">
+          <h3>用户UID配置</h3>
+          <div class="form-row">
+            <label>UID列表：</label>
+            <textarea id="uid-input" placeholder="输入用户UID，每行一个&#10;支持格式：&#10;- 完整链接：https://www.xiaohongshu.com/user/profile/xxx&#10;- 纯UID：24位十六进制字符"></textarea>
+          </div>
+          <div class="form-row">
+            <label>下载数量：</label>
+            <input type="number" id="download-count" value="20" min="1" max="500" placeholder="每个用户下载的笔记数量" />
+          </div>
+          <div class="form-row">
+            <label>文件夹名称：</label>
+            <input type="text" id="folder-name" placeholder="留空则使用用户名作为文件夹" />
+          </div>
+          <div class="form-row">
+            <label>文件导入：</label>
+            <input type="file" id="uid-file" accept=".txt,.csv" class="file-input" />
+          </div>
+          <div class="form-control-group">
+            <button id="btn-start" class="btn">开始批量下载</button>
+            <button id="btn-clear-records" class="btn btn-secondary">清除下载记录</button>
+            <button id="btn-view-records" class="btn btn-secondary">查看下载记录</button>
+            <button id="btn-show-all-users" class="btn btn-secondary">查看所有用户记录</button>
+          </div>
+        </div>
+
+        <div class="section" id="current-user-section" style="display:none;">
+          <h3>当前处理用户 <button id="btn-clear-current" class="btn btn-secondary" style="font-size:12px;padding:4px 8px;">清除记录</button></h3>
+          <div class="uid-info">
+            <p>用户名：<span id="current-user-display"></span></p>
+            <p>已下载：<span id="current-user-downloaded-count">0</span> 个视频</p>
+            <p>进度：<span id="current-user-progress">0%</span></p>
+          </div>
+          <div class="list-container" id="list-current-user-downloaded"></div>
+        </div>
+
+        <div class="section">
+          <h3>下载统计</h3>
+          <div class="stats">
+            <div class="stat-item">
+              <div class="stat-number" id="stat-users">0</div>
+              <div class="stat-label">用户总数</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-number" id="stat-completed">0</div>
+              <div class="stat-label">已完成</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-number" id="stat-downloaded">0</div>
+              <div class="stat-label">已下载</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-number" id="stat-skipped">0</div>
+              <div class="stat-label">已跳过</div>
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <h3>已完成下载</h3>
+          <div class="list-container" id="list-completed"></div>
+        </div>
+
+        <div class="section">
+          <h3>已跳过视频 <button id="btn-download-selected" class="btn btn-secondary" style="font-size:12px;padding:4px 8px;">下载选中</button></h3>
+          <div class="list-container" id="list-skipped"></div>
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <div class="section">
+          <h3>运行日志</h3>
+          <div class="log-area" id="log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 下载记录模态框 -->
+  <div id="records-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>用户下载记录详情</h3>
+        <button id="btn-close-records" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="records-content">
+          <p style="text-align:center;color:#666;padding:40px;">加载中...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 所有用户下载记录弹窗 -->
+  <div id="all-users-modal" class="modal" style="display:none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>所有用户下载记录</h3>
+        <button id="close-all-users-modal" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="all-users-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="user-batch.js"></script>
+</body>
+</html>
